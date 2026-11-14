@@ -44,6 +44,9 @@ export default function Navbar() {
           <NavLink to="/products" className={linkClass}>
             All Sweets
           </NavLink>
+          <NavLink to="/addresses" className={linkClass}>
+            Addresses
+          </NavLink>
         </div>
 
         {/* On phones: logo + cart on row 1, links on row 2, search on row 3 */}

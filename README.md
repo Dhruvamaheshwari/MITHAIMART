@@ -115,6 +115,18 @@ There is no customer login yet, so each browser creates a random guest id and se
 | DELETE | `/cart/remove/<product_id>/<variant_weight>/` | - |
 | DELETE | `/cart/clear/` | - |
 
+## Address and checkout APIs (guest)
+
+Same guest mechanism as the cart (`X-Guest-ID` header). Every address query includes the guest id, so one guest can never read or change another guest's addresses (they get 404).
+
+| Method | URL | Notes |
+|---|---|---|
+| GET, POST | `/addresses/` | POST needs `full_name`, `phone_number` (Indian 10-digit), `house_number`, `street`, `area`, `city`, `state`, `pincode` (6-digit); `landmark` optional |
+| GET, PUT, DELETE | `/addresses/<id>/` | only one default address per guest; the first address is default automatically |
+| POST | `/checkout/validate/` | body `{"address_id": "..."}`. Checks cart, address and stock, and returns totals calculated from database prices. Creates no order and does not clear the cart |
+
+Delivery charge is "To be confirmed": no delivery rule exists yet.
+
 ## Health check
 
 `GET /api/health/` returns `{"message": "MithaiMart API is working", "status": "success"}`.

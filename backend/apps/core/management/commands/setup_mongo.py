@@ -25,5 +25,10 @@ class Command(BaseCommand):
         db.carts.create_index("user_id")
         # One cart per guest
         db.carts.create_index("guest_id", unique=True)
+        # Addresses: quick lookup per guest, and at most ONE default address per guest
+        db.addresses.create_index("guest_id")
+        db.addresses.create_index(
+            "guest_id", unique=True, partialFilterExpression={"is_default": True}, name="one_default_per_guest"
+        )
 
         self.stdout.write(self.style.SUCCESS("MongoDB collections and indexes are ready."))

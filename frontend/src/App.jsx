@@ -2,7 +2,9 @@ import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
 import Footer from './components/Footer'
 import Navbar from './components/Navbar'
 import { CartProvider } from './context/CartContext'
+import Addresses from './pages/Addresses'
 import Cart from './pages/Cart'
+import Checkout from './pages/Checkout'
 import Home from './pages/Home'
 import ProductDetails from './pages/ProductDetails'
 import Products from './pages/Products'
@@ -30,6 +32,8 @@ export default function App() {
               <Route path="/products" element={<Products />} />
               <Route path="/products/:id" element={<ProductDetails />} />
               <Route path="/cart" element={<Cart />} />
+              <Route path="/checkout" element={<Checkout />} />
+              <Route path="/addresses" element={<Addresses />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </main>

@@ -24,7 +24,6 @@ export default function Cart() {
   const { cartItems, cartTotal, cartCount, loading, updating, loadError, updateQuantity, removeFromCart, clearCart } =
     useContext(CartContext)
   const [message, setMessage] = useState('') // error from the backend, e.g. "Only 5 available."
-  const [showCheckoutNote, setShowCheckoutNote] = useState(false)
 
   // Every action asks the backend first. We only show a message if the backend refuses.
   async function runAction(action) {
@@ -161,21 +160,23 @@ export default function Cart() {
                 {message}
               </p>
             )}
-            {showCheckoutNote && (
-              <p role="status" className="mt-4 rounded-lg border border-brand-gold/60 bg-white p-3 text-sm">
-                Checkout will be available in the next phase.
-              </p>
-            )}
-
             <div className="mt-6 flex flex-col gap-3">
-              <button
-                type="button"
-                disabled={hasUnavailableItems}
-                onClick={() => setShowCheckoutNote(true)}
-                className="rounded-full bg-brand-red px-6 py-3 font-medium text-white transition-colors hover:bg-brand-saffron disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Proceed to Checkout
-              </button>
+              {hasUnavailableItems ? (
+                <button
+                  type="button"
+                  disabled
+                  className="cursor-not-allowed rounded-full bg-brand-red px-6 py-3 font-medium text-white opacity-50"
+                >
+                  Proceed to Checkout
+                </button>
+              ) : (
+                <Link
+                  to="/checkout"
+                  className="rounded-full bg-brand-red px-6 py-3 text-center font-medium text-white transition-colors hover:bg-brand-saffron"
+                >
+                  Proceed to Checkout
+                </Link>
+              )}
               <Link
                 to="/products"
                 className="rounded-full border border-brand-red px-6 py-3 text-center font-medium text-brand-red transition-colors hover:bg-brand-red hover:text-white"
