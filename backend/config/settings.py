@@ -119,6 +119,10 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
+    # Admin APIs log in with a Django staff account (HTTP Basic auth for now)
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.BasicAuthentication"],
+    # Turns MongoDB errors into a safe 503 response
+    "EXCEPTION_HANDLER": "apps.core.exceptions.api_exception_handler",
 }
 
 # CORS: only the configured frontend origins may call the API.

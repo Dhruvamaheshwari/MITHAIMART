@@ -88,6 +88,21 @@ Frontend (`frontend/.env`): `VITE_API_BASE_URL` (default `http://localhost:8000/
 
 `.env` files are git-ignored; only `.env.example` files are committed.
 
+## Product and category APIs
+
+Base URL `http://localhost:8000/api`. Anyone can read (GET). Create/update/delete need a Django staff user (HTTP Basic auth); create one with `python manage.py createsuperuser`.
+
+| Method | URL | Notes |
+|---|---|---|
+| GET, POST | `/categories/` | GET lists active categories |
+| GET, PUT, DELETE | `/categories/<id>/` | DELETE is blocked while the category has products |
+| GET, POST | `/products/` | GET supports `search`, `category_id`, `min_price`, `max_price`, `sort=price_asc\|price_desc` |
+| GET, PUT, DELETE | `/products/<id>/` | |
+
+Product body: `name`, `description`, `category_id`, `image_url`, `is_active`, `variants` (list of `weight`, `price`, `stock`, `is_available`).
+
+In Postman use the **Authorization** tab, type **Basic Auth**, for admin requests.
+
 ## Health check
 
 `GET /api/health/` returns `{"message": "MithaiMart API is working", "status": "success"}`.
