@@ -23,7 +23,7 @@ export default function HomePage() {
           {error && <p className="mt-1 text-brand-red">Unreachable: {error}</p>}
           {health && (
             <p className="mt-1">
-              {health.service}: <strong>{health.status}</strong> (database: {health.database})
+              {health.message} (<strong>{health.status}</strong>)
             </p>
           )}
         </div>
