@@ -83,15 +83,17 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-# Database: PostgreSQL, configured entirely through environment variables.
+# MongoDB holds all MithaiMart data (see config/mongodb.py).
+MONGO_URI = get_env("MONGO_URI", required=True)
+MONGO_DB_NAME = get_env("MONGO_DB_NAME", "mithaimart")
+
+# Django's own built-in features (admin login, sessions, staff accounts) need an
+# SQL database. A small local SQLite file is used for those only.
+# No MithaiMart business data is stored here.
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": get_env("DB_NAME", required=True),
-        "USER": get_env("DB_USER", required=True),
-        "PASSWORD": get_env("DB_PASSWORD", required=True),
-        "HOST": get_env("DB_HOST", "localhost"),
-        "PORT": get_env("DB_PORT", "5432"),
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "django_internal.sqlite3",
     }
 }
 

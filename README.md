@@ -6,7 +6,7 @@ This repository currently contains **Phase 1: project foundation only** (no auth
 
 ## Stack
 
-- Backend: Python 3.12, Django, Django REST Framework, SimpleJWT (installed, not yet used), django-cors-headers, PostgreSQL
+- Backend: Python 3.12, Django, Django REST Framework, SimpleJWT (installed, not yet used), django-cors-headers, MongoDB (PyMongo, runs in Docker)
 - Frontend: React + Vite (JavaScript), Tailwind CSS 3, React Router DOM, Axios, Lucide React
 
 ## Structure
@@ -28,7 +28,7 @@ MithaiMart/
 
 ## Prerequisites
 
-- Python 3.12+, Node.js 20+, PostgreSQL 14+
+- Python 3.12+, Node.js 20+, Docker
 
 ## Backend setup
 
@@ -39,11 +39,13 @@ venv\Scripts\activate            # Windows  (macOS/Linux: source venv/bin/activa
 pip install -r requirements.txt
 ```
 
-Create the database (psql):
+Start MongoDB (from the project root, in Docker):
 
-```sql
-CREATE DATABASE mithaimart;
+```bash
+docker compose up -d
 ```
+
+MongoDB is published on host port **27018** (container port 27017), with a named volume `mongo_data` so data survives restarts.
 
 Configure environment:
 
@@ -51,7 +53,7 @@ Configure environment:
 copy .env.example .env           # macOS/Linux: cp .env.example .env
 ```
 
-Edit `backend/.env`: set `DJANGO_SECRET_KEY`, `DB_USER`, `DB_PASSWORD` (and `DB_NAME`/`DB_HOST`/`DB_PORT` if different). Generate a secret key with:
+Edit `backend/.env`: set `DJANGO_SECRET_KEY` and check `MONGO_URI` / `MONGO_DB_NAME`. Generate a secret key with:
 
 ```bash
 python -c "from django.core.management.utils import get_random_secret_key as g; print(g())"
@@ -60,7 +62,8 @@ python -c "from django.core.management.utils import get_random_secret_key as g; 
 Run:
 
 ```bash
-python manage.py migrate
+python manage.py migrate          # Django's own admin/session tables (local SQLite file)
+python manage.py setup_mongo      # creates MongoDB collections and indexes
 python manage.py runserver
 ```
 
@@ -79,7 +82,7 @@ App: http://localhost:5173 (shows the API status from the health endpoint).
 
 ## Environment variables
 
-Backend (`backend/.env`): `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `CORS_ALLOWED_ORIGINS`.
+Backend (`backend/.env`): `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `MONGO_URI`, `MONGO_DB_NAME`, `CORS_ALLOWED_ORIGINS`.
 
 Frontend (`frontend/.env`): `VITE_API_BASE_URL` (default `http://localhost:8000/api`).
 
@@ -87,7 +90,7 @@ Frontend (`frontend/.env`): `VITE_API_BASE_URL` (default `http://localhost:8000/
 
 ## Health check
 
-`GET /api/health/` returns `{"status": "ok", "service": "mithaimart-api", "database": "ok"}` (HTTP 200), or HTTP 503 with `"database": "unavailable"` if PostgreSQL cannot be reached.
+`GET /api/health/` returns `{"message": "MithaiMart API is working", "status": "success"}`.
 
 ## Tests
 

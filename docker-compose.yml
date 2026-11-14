@@ -1,0 +1,17 @@
+# MongoDB for local development. Start with: docker compose up -d
+services:
+  mongodb:
+    image: mongo:7
+    container_name: mithaimart-mongodb
+    restart: unless-stopped
+    ports:
+      - "27018:27017"   # host port 27018 because a local MongoDB service already uses 27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123   # development only - change for any real deployment
+      MONGO_INITDB_DATABASE: mithaimart
+    volumes:
+      - mongo_data:/data/db   # named volume keeps data after restarts
+
+volumes:
+  mongo_data:
