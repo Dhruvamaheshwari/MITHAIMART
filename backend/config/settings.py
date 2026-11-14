@@ -8,6 +8,8 @@ All secrets and environment-specific values come from environment variables
 import os
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
+
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
@@ -127,3 +129,5 @@ REST_FRAMEWORK = {
 
 # CORS: only the configured frontend origins may call the API.
 CORS_ALLOWED_ORIGINS = get_list("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+# The cart sends its guest id in this extra header, so the browser must be allowed to send it.
+CORS_ALLOW_HEADERS = list(default_headers) + ["x-guest-id"]

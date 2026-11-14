@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Candy } from 'lucide-react'
+import { CartContext } from '../context/CartContext'
 import api from '../services/api'
 import { formatPrice, getErrorMessage, isVariantAvailable } from '../utils/helpers'
 
@@ -12,6 +13,8 @@ export default function ProductDetails() {
   const [imageFailed, setImageFailed] = useState(false)
   const [selectedWeight, setSelectedWeight] = useState('')
   const [quantity, setQuantity] = useState(1)
+  const { addToCart, updating } = useContext(CartContext)
+  const [cartMessage, setCartMessage] = useState(null) // { ok, text } shown after Add to Cart
 
   useEffect(() => {
     let ignore = false
@@ -19,6 +22,7 @@ export default function ProductDetails() {
     setError('')
     setProduct(null)
     setImageFailed(false)
+    setCartMessage(null)
     api
       .get(`/products/${id}/`)
       .then((response) => {
@@ -69,6 +73,20 @@ export default function ProductDetails() {
   function chooseVariant(variant) {
     setSelectedWeight(variant.weight)
     setQuantity(1) // a new weight has its own stock, so start again from 1
+    setCartMessage(null)
+  }
+
+  // Sends only the product id, weight and quantity. The backend looks up the real price and stock.
+  async function handleAddToCart() {
+    if (!selectedVariant) return // no valid variant chosen, so nothing is sent
+    setCartMessage(null)
+    const result = await addToCart(product.id, selectedVariant.weight, quantity)
+    if (result.ok) {
+      setCartMessage({ ok: true, text: `Added ${quantity} x ${product.name} (${selectedVariant.weight}) to your cart.` })
+      setQuantity(1)
+    } else {
+      setCartMessage({ ok: false, text: result.message })
+    }
   }
 
   return (
@@ -159,10 +177,37 @@ export default function ProductDetails() {
                   Total: <span className="font-semibold text-brand-red">{formatPrice(selectedVariant.price * quantity)}</span>
                 </p>
               </div>
+
+              <button
+                type="button"
+                onClick={handleAddToCart}
+                disabled={updating}
+                className="mt-6 w-full rounded-full bg-brand-red px-6 py-3 font-medium text-white transition-colors hover:bg-brand-saffron disabled:opacity-60 sm:w-auto"
+              >
+                {updating ? 'Adding...' : 'Add to Cart'}
+              </button>
             </div>
           ) : (
             <p className="mt-6 rounded-lg bg-brand-cream p-4 text-brand-charcoal/80">
               This product is currently unavailable.
+            </p>
+          )}
+
+          {cartMessage && (
+            <p
+              role="status"
+              className={`mt-4 rounded-lg border p-3 text-sm ${
+                cartMessage.ok
+                  ? 'border-brand-gold/60 bg-brand-cream text-brand-charcoal'
+                  : 'border-brand-red/40 bg-brand-red/5 text-brand-red'
+              }`}
+            >
+              {cartMessage.text}{' '}
+              {cartMessage.ok && (
+                <Link to="/cart" className="font-semibold text-brand-red underline">
+                  View cart
+                </Link>
+              )}
             </p>
           )}
         </div>

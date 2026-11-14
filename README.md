@@ -103,6 +103,18 @@ Product body: `name`, `description`, `category_id`, `image_url`, `is_active`, `v
 
 In Postman use the **Authorization** tab, type **Basic Auth**, for admin requests.
 
+## Cart APIs (guest cart)
+
+There is no customer login yet, so each browser creates a random guest id and sends it in the `X-Guest-ID` header. The cart is saved in the MongoDB `carts` collection under that id. Prices are always read from the product in MongoDB, never from the request.
+
+| Method | URL | Body |
+|---|---|---|
+| GET | `/cart/` | - |
+| POST | `/cart/add/` | `product_id`, `variant_weight`, `quantity` (default 1) |
+| PUT | `/cart/update/` | `product_id`, `variant_weight`, `quantity` (1 or more) |
+| DELETE | `/cart/remove/<product_id>/<variant_weight>/` | - |
+| DELETE | `/cart/clear/` | - |
+
 ## Health check
 
 `GET /api/health/` returns `{"message": "MithaiMart API is working", "status": "success"}`.

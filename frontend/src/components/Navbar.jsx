@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, ShoppingBag } from 'lucide-react'
+import { CartContext } from '../context/CartContext'
 
 export default function Navbar() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [searchText, setSearchText] = useState('')
+  const { cartCount } = useContext(CartContext) // number shown next to the cart icon
 
   // Keep the box in sync with the ?search= value in the URL
   useEffect(() => {
@@ -63,16 +65,14 @@ export default function Navbar() {
           </button>
         </form>
 
-        {/* Cart is not built yet, so this is a disabled button, not a link */}
-        <button
-          type="button"
-          disabled
-          title="Cart coming soon"
-          aria-label="Cart (coming soon)"
-          className="order-2 cursor-not-allowed text-brand-charcoal/60 md:order-none"
+        <Link
+          to="/cart"
+          aria-label={`Cart, ${cartCount} items`}
+          className="order-2 flex items-center gap-2 text-sm font-medium text-brand-charcoal transition-colors hover:text-brand-red md:order-none"
         >
           <ShoppingBag size={22} />
-        </button>
+          Cart ({cartCount})
+        </Link>
       </nav>
     </header>
   )

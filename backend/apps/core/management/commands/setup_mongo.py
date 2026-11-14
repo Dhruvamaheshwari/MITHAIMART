@@ -23,5 +23,7 @@ class Command(BaseCommand):
         db.products.create_index("category_id")
         db.orders.create_index("user_id")
         db.carts.create_index("user_id")
+        # One cart per guest
+        db.carts.create_index("guest_id", unique=True)
 
         self.stdout.write(self.style.SUCCESS("MongoDB collections and indexes are ready."))
