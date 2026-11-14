@@ -1,5 +1,5 @@
-import { useContext, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useContext, useEffect, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import AddressForm from '../components/AddressForm'
 import { CartContext } from '../context/CartContext'
 import api from '../services/api'
@@ -7,7 +7,8 @@ import { formatPrice, getErrorMessage } from '../utils/helpers'
 
 export default function Checkout() {
   // Cart data comes from the backend (through the Cart Context)
-  const { cartItems, cartTotal, cartCount, loading: cartLoading } = useContext(CartContext)
+  const { cartItems, cartTotal, cartCount, loading: cartLoading, refreshCart } = useContext(CartContext)
+  const navigate = useNavigate()
 
   const [addresses, setAddresses] = useState([])
   const [addressesLoading, setAddressesLoading] = useState(true)
@@ -15,8 +16,9 @@ export default function Checkout() {
   const [selectedId, setSelectedId] = useState('')
   const [showForm, setShowForm] = useState(false)
 
-  const [checking, setChecking] = useState(false) // true while the backend validates
-  const [result, setResult] = useState(null) // { ok, message, problems?, data? }
+  const [placing, setPlacing] = useState(false) // true while the order request is running
+  const placingRef = useRef(false) // blocks a second click even before React re-renders
+  const [result, setResult] = useState(null) // error to show: { message, problems? }
 
   // Load saved addresses and pre-select the default one (the backend lists it first)
   function loadAddresses(selectThisId) {
@@ -42,28 +44,35 @@ export default function Checkout() {
     loadAddresses(savedAddress.id)
   }
 
-  // Place Order (preparation only). The backend re-checks cart, address, prices and stock.
-  // No order is created and the cart is not changed in this phase.
+  // Place Order. We send ONLY the address id. The backend takes the cart, prices and stock from
+  // MongoDB, calculates the total itself, saves the order and empties the cart.
   async function handlePlaceOrder() {
+    // A second click (double click) while the first request is running does nothing
+    if (placingRef.current) return
     setResult(null)
     if (cartItems.length === 0) {
-      setResult({ ok: false, message: 'Your cart is empty.' })
+      setResult({ message: 'Your cart is empty.' })
       return
     }
     if (!selectedId) {
-      setResult({ ok: false, message: 'Please select a delivery address.' })
+      setResult({ message: 'Please select a delivery address.' })
       return
     }
 
-    setChecking(true)
+    placingRef.current = true
+    setPlacing(true)
     try {
-      const response = await api.post('/checkout/validate/', { address_id: selectedId })
-      setResult({ ok: true, data: response.data })
+      const response = await api.post('/orders/create/', { address_id: selectedId })
+      // Success: open the confirmation page. It loads the order from the backend by its id.
+      navigate(`/order-confirmation/${response.data.id}`)
+      refreshCart() // the backend emptied the cart, so update the Navbar count
     } catch (err) {
       const data = err.response && err.response.data
-      setResult({ ok: false, message: (data && data.error) || getErrorMessage(err), problems: data && data.problems })
+      setResult({ message: (data && data.error) || getErrorMessage(err), problems: data && data.problems })
+      refreshCart() // stock or cart may have changed, so show the latest data
     } finally {
-      setChecking(false)
+      placingRef.current = false
+      setPlacing(false)
     }
   }
 
@@ -201,16 +210,16 @@ export default function Checkout() {
           <button
             type="button"
             onClick={handlePlaceOrder}
-            disabled={checking}
+            disabled={placing}
             className="mt-6 w-full rounded-full bg-brand-red px-6 py-3 font-medium text-white transition-colors hover:bg-brand-saffron disabled:opacity-60"
           >
-            {checking ? 'Checking...' : 'Place Order'}
+            {placing ? 'Placing your order...' : 'Place Order'}
           </button>
           <Link to="/cart" className="mt-3 block text-center text-sm underline hover:text-brand-red">
             Back to cart
           </Link>
 
-          {result && !result.ok && (
+          {result && (
             <div role="alert" className="mt-4 rounded-lg border border-brand-red/40 bg-white p-3 text-sm text-brand-red">
               <p>{result.message}</p>
               {result.problems && (
@@ -222,18 +231,6 @@ export default function Checkout() {
                   ))}
                 </ul>
               )}
-            </div>
-          )}
-
-          {result && result.ok && (
-            <div role="status" className="mt-4 rounded-lg border border-brand-gold/60 bg-white p-3 text-sm">
-              <p className="font-semibold">Checkout details are ready for order placement in the next phase.</p>
-              <p className="mt-1 text-brand-charcoal/70">
-                Confirmed by the server: {result.data.total_quantity} item(s), total{' '}
-                {formatPrice(result.data.total)} (delivery: {result.data.delivery_charge_note}). Deliver to{' '}
-                {result.data.address.full_name}, {result.data.address.city}. No order has been placed and your cart is
-                unchanged.
-              </p>
             </div>
           )}
         </aside>

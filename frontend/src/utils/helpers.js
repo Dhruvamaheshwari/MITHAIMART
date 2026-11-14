@@ -4,6 +4,10 @@ export function formatPrice(amount) {
   return '₹' + Number(amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })
 }
 
+export function formatDate(isoText) {
+  return new Date(isoText).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
 // A variant can be bought only if the shop marked it available AND stock is left.
 export function isVariantAvailable(variant) {
   return variant.is_available && variant.stock > 0

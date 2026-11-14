@@ -22,6 +22,9 @@ class Command(BaseCommand):
         # Fast lookups
         db.products.create_index("category_id")
         db.orders.create_index("user_id")
+        db.orders.create_index("guest_id")
+        # Every order number is unique, so two orders can never share a number
+        db.orders.create_index("order_number", unique=True)
         db.carts.create_index("user_id")
         # One cart per guest
         db.carts.create_index("guest_id", unique=True)

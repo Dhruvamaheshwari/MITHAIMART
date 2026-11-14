@@ -127,6 +127,20 @@ Same guest mechanism as the cart (`X-Guest-ID` header). Every address query incl
 
 Delivery charge is "To be confirmed": no delivery rule exists yet.
 
+## Order APIs (guest)
+
+Same guest mechanism (`X-Guest-ID` header). The backend takes the cart, prices and stock from MongoDB. It never uses a price or total sent by the browser.
+
+| Method | URL | Notes |
+|---|---|---|
+| POST | `/orders/create/` | body `{"address_id": "..."}`. Saves the order, reduces stock, then clears the cart |
+| GET | `/orders/` | this guest's orders, newest first |
+| GET | `/orders/<id>/` | one order; another guest's order returns 404 |
+
+Order status starts as `Pending` (Pending, Confirmed, Processing, Shipped, Delivered, Cancelled). Customers cannot change it. Payment method and delivery charge are "To be confirmed", and nothing is marked as paid.
+
+MongoDB here is a standalone server, so transactions are not used. Stock is reduced with an atomic "only if enough stock" update per item, given back if anything fails, and the cart is locked while an order is placed so a double click cannot create two orders. This is careful but it is not a full transaction. Run `python manage.py setup_mongo` once to create the unique `order_number` index.
+
 ## Health check
 
 `GET /api/health/` returns `{"message": "MithaiMart API is working", "status": "success"}`.

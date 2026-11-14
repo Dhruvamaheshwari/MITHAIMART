@@ -6,6 +6,8 @@ import Addresses from './pages/Addresses'
 import Cart from './pages/Cart'
 import Checkout from './pages/Checkout'
 import Home from './pages/Home'
+import MyOrders from './pages/MyOrders'
+import OrderConfirmation from './pages/OrderConfirmation'
 import ProductDetails from './pages/ProductDetails'
 import Products from './pages/Products'
 
@@ -34,6 +36,8 @@ export default function App() {
               <Route path="/cart" element={<Cart />} />
               <Route path="/checkout" element={<Checkout />} />
               <Route path="/addresses" element={<Addresses />} />
+              <Route path="/order-confirmation/:id" element={<OrderConfirmation />} />
+              <Route path="/my-orders" element={<MyOrders />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </main>

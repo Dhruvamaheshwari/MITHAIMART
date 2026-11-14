@@ -44,6 +44,9 @@ export default function Navbar() {
           <NavLink to="/products" className={linkClass}>
             All Sweets
           </NavLink>
+          <NavLink to="/my-orders" className={linkClass}>
+            My Orders
+          </NavLink>
           <NavLink to="/addresses" className={linkClass}>
             Addresses
           </NavLink>

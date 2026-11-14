@@ -14,13 +14,21 @@ export function CartProvider({ children }) {
   const [updating, setUpdating] = useState(false) // true while a request is running
   const [loadError, setLoadError] = useState('')
 
-  // Fetch the cart once when the app loads
-  useEffect(() => {
-    api
+  // Ask the backend for the current cart
+  function refreshCart() {
+    return api
       .get('/cart/')
-      .then((response) => setCart(response.data))
+      .then((response) => {
+        setCart(response.data)
+        setLoadError('')
+      })
       .catch((err) => setLoadError(getErrorMessage(err)))
       .finally(() => setLoading(false))
+  }
+
+  // Fetch the cart once when the app loads
+  useEffect(() => {
+    refreshCart()
   }, [])
 
   // Runs one cart request. The backend always answers with the full updated cart,
@@ -67,6 +75,7 @@ export function CartProvider({ children }) {
     loading,
     updating,
     loadError,
+    refreshCart, // used after an order is placed, because the backend emptied the cart
     addToCart,
     updateQuantity,
     removeFromCart,
