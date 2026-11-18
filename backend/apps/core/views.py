@@ -1,6 +1,8 @@
+import io
 import logging
 import threading
 from datetime import datetime, timezone
+import qrcode
 from django.conf import settings
 from django.core.mail import send_mail
 from django.http import HttpResponse
@@ -156,3 +158,36 @@ def download_catalog_pdf_view(request):
     except Exception as e:
         logger.exception(f"Failed to generate catalog PDF: {e}")
         return Response({"error": "Failed to generate catalog PDF."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def download_catalog_qr_view(request):
+    """Generates and returns the official branded QR code for MithaiMart sweets catalog."""
+    target_url = request.query_params.get("url", "").strip()
+    if not target_url:
+        target_url = "https://drive.google.com/file/d/1GNaSSHSl6RAJga3TLmpjHFht_LvgBEm8/view?usp=sharing"
+
+    try:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=12,
+            border=3,
+        )
+        qr.add_data(target_url)
+        qr.make(fit=True)
+
+        img = qr.make_image(fill_color="#542B24", back_color="#FFF8EC")
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        buffer.seek(0)
+
+        download = request.query_params.get("download", "0") in ("1", "true")
+        response = HttpResponse(buffer.getvalue(), content_type="image/png")
+        if download:
+            response["Content-Disposition"] = 'attachment; filename="MithaiMart-Sweets-Catalog-QR.png"'
+        return response
+    except Exception as e:
+        logger.exception(f"Failed to generate QR code: {e}")
+        return Response({"error": "Failed to generate QR code."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

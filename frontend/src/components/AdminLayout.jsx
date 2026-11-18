@@ -63,6 +63,9 @@ export default function AdminLayout() {
           <NavLink to="/admin/orders" className={linkClass}>
             Orders
           </NavLink>
+          <NavLink to="/admin/wholesale" className={linkClass}>
+            Wholesale Orders
+          </NavLink>
         </nav>
         <div className="flex gap-4 px-4 pb-4 text-sm md:flex-col md:gap-2">
           <Link to="/" className="underline hover:text-brand-red">

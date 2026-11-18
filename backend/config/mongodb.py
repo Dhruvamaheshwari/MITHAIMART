@@ -21,6 +21,10 @@ COLLECTIONS = [
     "addresses",
     "coupons",
     "reviews",
+    "gift_boxes",
+    "hamper_settings",
+    "bulk_pricing_rules",
+    "wholesale_requests",
 ]
 
 _client = None

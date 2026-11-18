@@ -35,7 +35,7 @@ def get_list(name, default=""):
 
 SECRET_KEY = get_env("DJANGO_SECRET_KEY", required=True)
 DEBUG = get_env("DJANGO_DEBUG", "False").lower() in ("1", "true", "yes")
-ALLOWED_HOSTS = get_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+ALLOWED_HOSTS = get_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
 
 INSTALLED_APPS = [
     "django.contrib.admin",

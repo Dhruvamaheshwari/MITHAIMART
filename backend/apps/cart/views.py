@@ -30,6 +30,9 @@ def merge_cart_into(db, from_owner_id, to_owner_id):
     items = to_cart["items"] if to_cart else []
 
     for guest_item in from_cart["items"]:
+        if guest_item.get("is_hamper") or guest_item.get("is_bulk"):
+            items.append(guest_item)
+            continue
         product = db.products.find_one({"_id": guest_item["product_id"]})
         if product is None or not product["is_active"]:
             continue
@@ -113,46 +116,158 @@ def refresh_snapshot(item, product, variant):
 
 def cart_to_json(db, cart):
     """Build the response. Price and stock are re-read from the products collection,
-    so the cart always shows the real current price and stock."""
+    so the cart always shows the real current price and stock for normal items and hamper sweets."""
     items = cart["items"] if cart else []
-    product_ids = [item["product_id"] for item in items]
-    products = {p["_id"]: p for p in db.products.find({"_id": {"$in": product_ids}})}
+    all_product_ids = []
+    for item in items:
+        if item.get("is_hamper"):
+            for sweet in item.get("items", []):
+                all_product_ids.append(sweet["product_id"])
+        else:
+            all_product_ids.append(item["product_id"])
+
+    products = {p["_id"]: p for p in db.products.find({"_id": {"$in": all_product_ids}})}
 
     result_items = []
     total_quantity = 0
     subtotal = 0.0
+
     for item in items:
-        product = products.get(item["product_id"])
-        variant = None
-        if product is not None:
-            variant = next((v for v in product["variants"] if v["weight"] == item["variant_weight"]), None)
+        if item.get("is_hamper"):
+            hamper_sweets = []
+            hamper_sweets_total = 0.0
+            hamper_available = True
+            problem_reasons = []
 
-        # Use live values when the product still exists, else the saved copy
-        price = variant["price"] if variant else item["variant_price"]
-        stock = variant["stock"] if variant else 0
-        # Can this item be ordered exactly as it is in the cart?
-        available = bool(
-            product and product["is_active"] and variant and variant["is_available"] and item["quantity"] <= stock
-        )
-        item_total = round(price * item["quantity"], 2)
-        # Every item is counted. Items that cannot be ordered are marked "available": false
-        # so the page can warn the customer (checkout stays blocked until they are fixed).
-        total_quantity += item["quantity"]
-        subtotal += item_total
+            for sweet in item.get("items", []):
+                p = products.get(sweet["product_id"])
+                v = None
+                if p:
+                    v = next((v for v in p.get("variants", []) if v["weight"] == sweet["variant_weight"]), None)
 
-        result_items.append(
-            {
+                price = v["price"] if v else sweet.get("unit_price", 0.0)
+                stock = v["stock"] if v else 0
+                qty = sweet.get("quantity", 1)
+
+                sweet_avail = bool(p and p["is_active"] and v and v["is_available"] and qty <= stock)
+                if not sweet_avail:
+                    hamper_available = False
+                    problem_reasons.append(f"{sweet.get('product_name', 'Item')} ({sweet.get('variant_weight')}) unavailable or out of stock")
+
+                sweet_total = round(price * qty, 2)
+                hamper_sweets_total += sweet_total
+
+                hamper_sweets.append({
+                    "product_id": str(sweet["product_id"]),
+                    "product_name": p["name"] if p else sweet["product_name"],
+                    "product_image": p["image_url"] if p else sweet.get("product_image", ""),
+                    "variant_weight": sweet["variant_weight"],
+                    "unit_price": price,
+                    "quantity": qty,
+                    "item_total": sweet_total,
+                    "stock": stock,
+                    "available": sweet_avail,
+                })
+
+            packaging_price = float(item.get("packaging_price", 0.0))
+            gift_wrap_price = float(item.get("gift_wrap_price", 0.0))
+            hamper_final_total = round(hamper_sweets_total + packaging_price + gift_wrap_price, 2)
+
+            subtotal += hamper_final_total
+            total_quantity += 1
+
+            result_items.append({
+                "is_hamper": True,
+                "hamper_id": item.get("hamper_id"),
+                "product_id": f"hamper-{item.get('hamper_id')}",
+                "product_name": f"Custom Mithai Hamper ({item.get('box_size', 'Gift Box')})",
+                "product_image": item.get("box_image", "/images/sweets/assorted-sweets-box-2.jpg"),
+                "box_id": str(item.get("box_id")),
+                "box_name": item.get("box_name"),
+                "box_size": item.get("box_size"),
+                "box_image": item.get("box_image"),
+                "packaging_price": packaging_price,
+                "gift_wrap_price": gift_wrap_price,
+                "customization": item.get("customization", {}),
+                "items": hamper_sweets,
+                "sweets_count": sum(s["quantity"] for s in hamper_sweets),
+                "sweets_subtotal": round(hamper_sweets_total, 2),
+                "quantity": 1,
+                "item_total": hamper_final_total,
+                "available": hamper_available,
+                "problem_reasons": problem_reasons,
+            })
+        elif item.get("is_bulk"):
+            product = products.get(item["product_id"])
+            variant = None
+            if product is not None:
+                variant = next((v for v in product["variants"] if v["weight"] == item["variant_weight"]), None)
+
+            price = variant["price"] if variant else item.get("unit_price", 0.0)
+            stock = variant["stock"] if variant else 0
+            available = bool(
+                product and product["is_active"] and variant and variant["is_available"] and item["quantity"] <= stock
+            )
+            from apps.core.bulk_views import calculate_item_bulk_discount, get_bulk_rules
+            from apps.core.hamper_views import parse_weight_to_grams
+            rules = get_bulk_rules(db)
+            grams = parse_weight_to_grams(item["variant_weight"])
+            calc = calculate_item_bulk_discount(grams, item["quantity"], price, rules)
+
+            total_quantity += item["quantity"]
+            subtotal += calc["discounted_total"]
+
+            result_items.append({
+                "is_bulk": True,
+                "is_hamper": False,
+                "bulk_id": item.get("bulk_id"),
                 "product_id": str(item["product_id"]),
-                "product_name": product["name"] if product else item["product_name"],
-                "product_image": product["image_url"] if product else item["product_image"],
+                "product_name": product["name"] if product else item.get("product_name", "Sweet"),
+                "product_image": product["image_url"] if product else item.get("product_image", ""),
                 "variant_weight": item["variant_weight"],
                 "variant_price": price,
                 "quantity": item["quantity"],
-                "item_total": item_total,
+                "normal_total": calc["normal_total"],
+                "discount_percentage": calc["discount_percentage"],
+                "discount_amount": calc["discount_amount"],
+                "item_total": calc["discounted_total"],
+                "total_weight_kg": calc["total_weight_kg"],
                 "stock": stock,
                 "available": available,
-            }
-        )
+            })
+        else:
+            product = products.get(item["product_id"])
+            variant = None
+            if product is not None:
+                variant = next((v for v in product["variants"] if v["weight"] == item["variant_weight"]), None)
+
+            # Use live values when the product still exists, else the saved copy
+            price = variant["price"] if variant else item["variant_price"]
+            stock = variant["stock"] if variant else 0
+            # Can this item be ordered exactly as it is in the cart?
+            available = bool(
+                product and product["is_active"] and variant and variant["is_available"] and item["quantity"] <= stock
+            )
+            item_total = round(price * item["quantity"], 2)
+            # Every item is counted. Items that cannot be ordered are marked "available": false
+            # so the page can warn the customer (checkout stays blocked until they are fixed).
+            total_quantity += item["quantity"]
+            subtotal += item_total
+
+            result_items.append(
+                {
+                    "is_hamper": False,
+                    "product_id": str(item["product_id"]),
+                    "product_name": product["name"] if product else item["product_name"],
+                    "product_image": product["image_url"] if product else item["product_image"],
+                    "variant_weight": item["variant_weight"],
+                    "variant_price": price,
+                    "quantity": item["quantity"],
+                    "item_total": item_total,
+                    "stock": stock,
+                    "available": available,
+                }
+            )
     return {"items": result_items, "total_quantity": total_quantity, "subtotal": round(subtotal, 2)}
 
 
@@ -243,13 +358,39 @@ def cart_remove(request, product_id, variant_weight):
     owner_id, error = get_owner(request)
     if error:
         return error
-    product_object_id = to_object_id(product_id)
-    if product_object_id is None:
-        return error_response("Invalid product id.", status.HTTP_400_BAD_REQUEST)
 
     db = get_db()
     cart = db.carts.find_one({"owner_id": owner_id})
     items = cart["items"] if cart else []
+
+    # Handle removing a hamper item
+    if str(product_id).startswith("hamper-") or variant_weight == "hamper":
+        target_id = str(product_id).replace("hamper-", "")
+        updated_items = [
+            it for it in items
+            if not (it.get("is_hamper") and (str(it.get("hamper_id")) == target_id or str(it.get("box_id")) == target_id))
+        ]
+        if len(updated_items) == len(items):
+            return error_response("This hamper is not in your cart.", status.HTTP_404_NOT_FOUND)
+        save_items(db, owner_id, updated_items)
+        return Response(cart_to_json(db, {"items": updated_items}))
+
+    # Handle removing a bulk item
+    if str(product_id).startswith("bulk-") or variant_weight == "bulk":
+        target_id = str(product_id).replace("bulk-", "")
+        updated_items = [
+            it for it in items
+            if not (it.get("is_bulk") and (str(it.get("bulk_id")) == target_id or str(it.get("product_id")) == target_id))
+        ]
+        if len(updated_items) == len(items):
+            return error_response("This bulk item is not in your cart.", status.HTTP_404_NOT_FOUND)
+        save_items(db, owner_id, updated_items)
+        return Response(cart_to_json(db, {"items": updated_items}))
+
+    product_object_id = to_object_id(product_id)
+    if product_object_id is None:
+        return error_response("Invalid product id.", status.HTTP_400_BAD_REQUEST)
+
     item = find_item(items, product_object_id, variant_weight)
     if item is None:
         return error_response("This item is not in your cart.", status.HTTP_404_NOT_FOUND)

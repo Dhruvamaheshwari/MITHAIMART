@@ -2,13 +2,16 @@ import { useContext, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BookOpen,
+  Boxes,
   ChevronDown,
+  Gift,
   LogOut,
   MapPin,
   Menu,
   Phone,
   Search,
   ShoppingBag,
+  Sparkles,
   Store,
   User,
   X,
@@ -418,6 +421,28 @@ export default function Navbar() {
               )}
             </div>
           ))}
+
+          <Link
+            to="/build-hamper"
+            className="flex items-center gap-1.5 py-1 px-3.5 rounded-full bg-gradient-to-r from-[#9B4A32] to-[#C99A42] text-[#FFF8EC] hover:text-white hover:brightness-110 active:scale-95 transition-all shadow-xs border border-[#C99A42]/40"
+          >
+            <Sparkles size={13} className="text-[#FFF8EC]" />
+            <span>Customize Your Hamper</span>
+            <span className="rounded-full bg-[#542B24] px-1.5 py-0.2 text-[9px] font-black uppercase text-[#FFF8EC]">
+              New
+            </span>
+          </Link>
+
+          <Link
+            to="/bulk-orders"
+            className="flex items-center gap-1.5 py-1 px-3.5 rounded-full bg-[#542B24] border border-[#C99A42]/60 text-[#FFF8EC] hover:bg-[#C99A42] hover:text-[#542B24] active:scale-95 transition-all shadow-xs"
+          >
+            <Boxes size={13} className="text-[#C99A42]" />
+            <span>Bulk Orders</span>
+            <span className="rounded-full bg-[#9B4A32] px-1.5 py-0.2 text-[9px] font-black uppercase text-[#FFF8EC]">
+              Wholesale
+            </span>
+          </Link>
         </div>
       </nav>
 
@@ -455,6 +480,32 @@ export default function Navbar() {
           <p className="text-[11px] font-extrabold uppercase tracking-wider text-[#542B24]/60 px-2 mb-2">
             Explore Categories
           </p>
+          <Link
+            to="/build-hamper"
+            onClick={() => setMobileMenuOpen(false)}
+            className="flex items-center justify-between rounded-xl bg-gradient-to-r from-[#542B24] to-[#9B4A32] p-3 text-xs font-bold text-white shadow-xs mb-2"
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles size={15} className="text-[#C99A42]" />
+              <span>Customize Your Hamper</span>
+            </div>
+            <span className="rounded-full bg-[#C99A42] px-2 py-0.5 text-[9px] font-black uppercase text-[#542B24]">
+              New
+            </span>
+          </Link>
+          <Link
+            to="/bulk-orders"
+            onClick={() => setMobileMenuOpen(false)}
+            className="flex items-center justify-between rounded-xl bg-[#FFF8EC] border border-[#C99A42]/60 p-3 text-xs font-bold text-[#542B24] shadow-xs mb-2 hover:bg-[#E8D5B5]/40"
+          >
+            <div className="flex items-center gap-2">
+              <Boxes size={15} className="text-[#9B4A32]" />
+              <span>Bulk Orders & Wholesale</span>
+            </div>
+            <span className="rounded-full bg-[#9B4A32] px-2 py-0.5 text-[9px] font-black uppercase text-white">
+              Save More
+            </span>
+          </Link>
           <div className="space-y-1">
             {MENU_SECTIONS.map((section) => (
               <div key={section.name}>

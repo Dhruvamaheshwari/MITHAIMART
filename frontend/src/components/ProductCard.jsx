@@ -63,7 +63,7 @@ export default function ProductCard({ product, categoryName }) {
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-xl border border-[#E8D5B5] bg-white text-left transition-all duration-200 ease-out hover:-translate-y-1 hover:border-[#C99A42] hover:shadow-md">
       {/* Product Image */}
-      <Link to={productPath} className="relative block aspect-[4/3] sm:aspect-square overflow-hidden bg-gradient-to-b from-[#FFF8EC] to-[#E8D5B5]/25">
+      <Link to={productPath} className="relative block aspect-square w-full overflow-hidden bg-gradient-to-b from-[#FFF8EC] to-[#E8D5B5]/25">
         {product.image_url && !imageFailed ? (
           <img
             src={product.image_url}
@@ -73,8 +73,9 @@ export default function ProductCard({ product, categoryName }) {
             className="h-full w-full object-cover object-center transition-transform duration-500 ease-out group-hover:scale-105"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-[#9B4A32]/40">
-            <Candy size={40} className="animate-float" />
+          <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-[#FFF8EC] to-[#E8D5B5]/40 text-[#9B4A32]/40">
+            <Candy size={42} className="animate-float text-[#9B4A32]" />
+            <span className="mt-2 text-[10px] font-bold uppercase tracking-wider text-[#542B24]/40">MithaiMart</span>
           </div>
         )}
 

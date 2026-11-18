@@ -948,6 +948,56 @@ const photoCredits = [
     "sourceUrl": "https://commons.wikimedia.org/wiki/File:Joynagarer_Moa,Kolkata_-_West_Bengal_-_DSC_0035.jpg",
     "title": "Joynagarer Moa,Kolkata - West Bengal - DSC 0035.jpg",
     "generated": true
+  },
+  {
+    "path": "/images/sweets/chakhao-kheer.jpg",
+    "subject": "Chak-Hao Kheer",
+    "usedFor": "Product (Manipur)",
+    "author": "Wikimedia Commons Contributor",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Chahao_kheer.jpg",
+    "title": "Chahao kheer.jpg"
+  },
+  {
+    "path": "/images/sweets/qubani-ka-meetha.jpg",
+    "subject": "Qubani Ka Meetha",
+    "usedFor": "Product (Telangana)",
+    "author": "Wikimedia Commons Contributor",
+    "license": "CC BY-SA 3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Khobani_Ka_Meetha.JPG",
+    "title": "Khobani Ka Meetha.JPG"
+  },
+  {
+    "path": "/images/sweets/panjiri.jpg",
+    "subject": "Punjabi Panjiri",
+    "usedFor": "Product (Punjab)",
+    "author": "Miansari66",
+    "license": "CC0 Public Domain",
+    "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Panjeeri..JPG",
+    "title": "Panjeeri..JPG"
+  },
+  {
+    "path": "/images/sweets/gathiya.jpg",
+    "subject": "Gujarati Gathiya",
+    "usedFor": "Product (Gujarat)",
+    "author": "Wikimedia Commons Contributor",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Gathiya.jpg",
+    "title": "Gathiya.jpg"
+  },
+  {
+    "path": "/images/sweets/mawa-kachori.jpg",
+    "subject": "Mawa Kachori",
+    "usedFor": "Product (Rajasthan)",
+    "author": "Wikimedia Commons Contributor",
+    "license": "CC BY-SA 3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Khasta_kachori.jpg",
+    "title": "Khasta kachori.jpg"
   }
 ]
 

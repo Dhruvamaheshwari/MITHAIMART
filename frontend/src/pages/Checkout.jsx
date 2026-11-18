@@ -1,5 +1,6 @@
 import { useContext, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Check, Gift, Tag, Trash2, X } from 'lucide-react'
 import AddressForm from '../components/AddressForm'
 import { CartContext } from '../context/CartContext'
 import api from '../services/api'
@@ -19,6 +20,36 @@ export default function Checkout() {
   const [placing, setPlacing] = useState(false) // true while the order request is running
   const placingRef = useRef(false) // blocks a second click even before React re-renders
   const [result, setResult] = useState(null) // error to show: { message, problems? }
+
+  // Coupon state
+  const [couponInput, setCouponInput] = useState('')
+  const [appliedCoupon, setAppliedCoupon] = useState(null)
+  const [couponLoading, setCouponLoading] = useState(false)
+  const [couponError, setCouponError] = useState('')
+
+  async function handleApplyCoupon(e) {
+    if (e) e.preventDefault()
+    if (!couponInput.trim()) return
+    setCouponLoading(true)
+    setCouponError('')
+    try {
+      const res = await api.post('/coupons/validate/', { code: couponInput.trim() })
+      setAppliedCoupon(res.data)
+      setCouponError('')
+    } catch (err) {
+      const errMsg = err.response?.data?.error || 'Invalid or expired coupon code.'
+      setCouponError(errMsg)
+      setAppliedCoupon(null)
+    } finally {
+      setCouponLoading(false)
+    }
+  }
+
+  function handleRemoveCoupon() {
+    setAppliedCoupon(null)
+    setCouponInput('')
+    setCouponError('')
+  }
 
   // Load saved addresses and pre-select the default one (the backend lists it first)
   function loadAddresses(selectThisId) {
@@ -62,7 +93,10 @@ export default function Checkout() {
     placingRef.current = true
     setPlacing(true)
     try {
-      const response = await api.post('/orders/create/', { address_id: selectedId })
+      const response = await api.post('/orders/create/', {
+        address_id: selectedId,
+        coupon_code: appliedCoupon ? appliedCoupon.code : null,
+      })
       // Success: open the confirmation page. It loads the order from the backend by its id.
       navigate(`/order-confirmation/${response.data.id}`)
       refreshCart() // the backend emptied the cart, so update the Navbar count
@@ -175,17 +209,74 @@ export default function Checkout() {
           <h2 className="text-xl font-semibold">Order summary</h2>
 
           <ul className="mt-4 divide-y divide-brand-gold/30 text-sm">
-            {cartItems.map((item) => (
-              <li key={`${item.product_id}-${item.variant_weight}`} className="py-3">
-                <p className="font-medium">{item.product_name}</p>
-                <p className="text-brand-charcoal/70">
-                  {item.variant_weight} &middot; {item.quantity} x {formatPrice(item.variant_price)}
-                </p>
-                <p className="text-right font-semibold">{formatPrice(item.item_total)}</p>
-                {!item.available && <p className="text-brand-red">This item needs attention. Check your cart.</p>}
-              </li>
-            ))}
+            {cartItems.map((item) =>
+              item.is_hamper ? (
+                <li key={`hamper-${item.hamper_id}`} className="py-3">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-brand-red">
+                    <Gift size={12} /> Custom Mithai Hamper
+                  </div>
+                  <p className="font-semibold text-brand-charcoal">{item.box_name} ({item.box_size})</p>
+                  <p className="text-xs text-brand-charcoal/70">
+                    Includes {item.items?.length || 0} sweets
+                    {item.gift_wrap_price > 0 && ' • Festive Gift Wrapping'}
+                  </p>
+                  <p className="text-right font-semibold text-brand-red">{formatPrice(item.item_total)}</p>
+                  {!item.available && <p className="text-brand-red text-xs">This hamper needs attention.</p>}
+                </li>
+              ) : (
+                <li key={`${item.product_id}-${item.variant_weight}`} className="py-3">
+                  <p className="font-medium">{item.product_name}</p>
+                  <p className="text-brand-charcoal/70">
+                    {item.variant_weight} &middot; {item.quantity} x {formatPrice(item.variant_price)}
+                  </p>
+                  <p className="text-right font-semibold">{formatPrice(item.item_total)}</p>
+                  {!item.available && <p className="text-brand-red">This item needs attention. Check your cart.</p>}
+                </li>
+              )
+            )}
           </ul>
+
+          {/* Coupon Code Section */}
+          <div className="mt-4 border-t border-brand-gold/40 pt-4">
+            <label className="block text-xs font-bold text-brand-charcoal mb-1.5 flex items-center gap-1.5">
+              <Tag size={13} className="text-brand-saffron" /> Have a Discount Coupon?
+            </label>
+            {appliedCoupon ? (
+              <div className="flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                <div className="flex items-center gap-2">
+                  <Check size={14} className="text-emerald-600" />
+                  <span>
+                    <b>{appliedCoupon.code}</b> ({formatPrice(appliedCoupon.discount_amount)} OFF)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRemoveCoupon}
+                  className="text-emerald-700 hover:text-red-600 transition p-1"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleApplyCoupon} className="flex gap-2">
+                <input
+                  type="text"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                  placeholder="e.g. HAMPER10-XXXX"
+                  className="w-full rounded-full border border-brand-gold/40 bg-white px-3.5 py-1.5 text-xs uppercase outline-none focus:border-brand-red"
+                />
+                <button
+                  type="submit"
+                  disabled={couponLoading || !couponInput.trim()}
+                  className="rounded-full bg-brand-charcoal px-4 py-1.5 text-xs font-bold text-white hover:bg-brand-red transition disabled:opacity-50 cursor-pointer"
+                >
+                  {couponLoading ? '...' : 'Apply'}
+                </button>
+              </form>
+            )}
+            {couponError && <p className="mt-1 text-[11px] text-red-600 font-medium">{couponError}</p>}
+          </div>
 
           <dl className="mt-4 space-y-2 border-t border-brand-gold/40 pt-4 text-sm">
             <div className="flex justify-between">
@@ -196,13 +287,21 @@ export default function Checkout() {
               <dt>Subtotal</dt>
               <dd>{formatPrice(cartTotal)}</dd>
             </div>
+            {appliedCoupon && (
+              <div className="flex justify-between text-emerald-700 font-semibold">
+                <dt>Coupon Discount ({appliedCoupon.code})</dt>
+                <dd>-{formatPrice(appliedCoupon.discount_amount)}</dd>
+              </div>
+            )}
             <div className="flex justify-between">
               <dt>Delivery charge</dt>
               <dd>To be confirmed</dd>
             </div>
             <div className="flex justify-between border-t border-brand-gold/40 pt-2 text-base font-semibold">
               <dt>Final total</dt>
-              <dd className="text-brand-red">{formatPrice(cartTotal)}</dd>
+              <dd className="text-brand-red">
+                {formatPrice(Math.max(0, cartTotal - (appliedCoupon?.discount_amount || 0)))}
+              </dd>
             </div>
           </dl>
           <p className="mt-1 text-xs text-brand-charcoal/60">The final total does not include delivery yet.</p>

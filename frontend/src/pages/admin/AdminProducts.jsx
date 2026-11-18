@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Candy } from 'lucide-react'
 import ProjectPhotoPicker from '../../components/ProjectPhotoPicker'
 import adminApi from '../../services/adminApi'
 import { formatPrice, getErrorMessage } from '../../utils/helpers'
@@ -504,9 +505,22 @@ export default function AdminProducts() {
         {products.map((product) => (
           <li key={product.id} className="rounded-xl border border-brand-gold/40 bg-white p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="font-display text-lg font-semibold">{product.name}</p>
-                <p className="text-sm text-brand-charcoal/70">{[product.category_name, product.state].filter(Boolean).join(' · ')}</p>
+              <div className="flex items-center gap-3.5">
+                {product.image_url ? (
+                  <img
+                    src={product.image_url}
+                    alt={product.name}
+                    className="h-12 w-12 rounded-lg object-cover border border-brand-gold/40 shrink-0"
+                  />
+                ) : (
+                  <div className="h-12 w-12 rounded-lg bg-brand-cream border border-brand-gold/40 flex items-center justify-center shrink-0 text-brand-charcoal/40">
+                    <Candy size={20} />
+                  </div>
+                )}
+                <div>
+                  <p className="font-display text-lg font-semibold">{product.name}</p>
+                  <p className="text-sm text-brand-charcoal/70">{[product.category_name, product.state].filter(Boolean).join(' · ')}</p>
+                </div>
               </div>
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ${product.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'}`}>
                 {product.is_active ? 'Active' : 'Inactive'}

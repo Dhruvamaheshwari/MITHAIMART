@@ -13,6 +13,7 @@ import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminLogin from './pages/admin/AdminLogin'
 import AdminOrders from './pages/admin/AdminOrders'
 import AdminProducts from './pages/admin/AdminProducts'
+import AdminWholesale from './pages/admin/AdminWholesale'
 import Cart from './pages/Cart'
 import Checkout from './pages/Checkout'
 import Credits from './pages/Credits'
@@ -24,6 +25,8 @@ import ProductDetails from './pages/ProductDetails'
 import Products from './pages/Products'
 import Contact from './pages/Contact'
 import Catalog from './pages/Catalog'
+import BuildHamper from './pages/BuildHamper'
+import BulkOrders from './pages/BulkOrders'
 
 function NotFound() {
   return (
@@ -71,6 +74,7 @@ export default function App() {
               <Route path="products" element={<AdminProducts />} />
               <Route path="categories" element={<AdminCategories />} />
               <Route path="orders" element={<AdminOrders />} />
+              <Route path="wholesale" element={<AdminWholesale />} />
             </Route>
 
             {/* Customer store */}
@@ -79,6 +83,8 @@ export default function App() {
               <Route path="/products" element={<Products />} />
               <Route path="/products/:id" element={<ProductDetails />} />
               <Route path="/cart" element={<Cart />} />
+              <Route path="/build-hamper" element={<BuildHamper />} />
+              <Route path="/bulk-orders" element={<BulkOrders />} />
               <Route path="/checkout" element={<RequireLogin><Checkout /></RequireLogin>} />
               <Route path="/addresses" element={<RequireLogin><Addresses /></RequireLogin>} />
               <Route path="/order-confirmation/:id" element={<RequireLogin><OrderConfirmation /></RequireLogin>} />

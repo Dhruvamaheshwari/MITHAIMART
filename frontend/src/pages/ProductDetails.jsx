@@ -214,8 +214,9 @@ export default function ProductDetails() {
                     className="h-full w-full object-cover object-center transition-transform duration-500 ease-out group-hover:scale-105"
                   />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center text-[#9B4A32]/40">
-                    <Candy size={80} className="animate-float" />
+                  <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-[#FFF8EC] to-[#E8D5B5]/40 text-[#9B4A32]/40">
+                    <Candy size={72} className="animate-float text-[#9B4A32]" />
+                    <span className="mt-3 text-xs font-bold uppercase tracking-wider text-[#542B24]/50">MithaiMart Artisanal Sweets</span>
                   </div>
                 )}
               </div>

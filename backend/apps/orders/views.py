@@ -89,18 +89,50 @@ def checkout_validate(request):
     problems = []
     for item in cart_data["items"]:
         if not item["available"]:
-            if item["stock"] > 0:
-                reason = f"Only {item['stock']} left. Please lower the quantity."
+            if item.get("is_hamper"):
+                for pr in item.get("problem_reasons", []):
+                    problems.append(
+                        {"product_name": item["product_name"], "variant_weight": item.get("box_size", "Hamper"), "message": pr}
+                    )
             else:
-                reason = "No longer available. Please remove it from your cart."
-            problems.append(
-                {"product_name": item["product_name"], "variant_weight": item["variant_weight"], "message": reason}
-            )
+                if item["stock"] > 0:
+                    reason = f"Only {item['stock']} left. Please lower the quantity."
+                else:
+                    reason = "No longer available. Please remove it from your cart."
+                problems.append(
+                    {"product_name": item["product_name"], "variant_weight": item["variant_weight"], "message": reason}
+                )
     if problems:
         return Response(
             {"error": "Some items in your cart are not available.", "problems": problems},
             status=status.HTTP_409_CONFLICT,
         )
+
+    # Optional Coupon Validation
+    coupon_code = request.data.get("coupon_code")
+    coupon_discount = 0.0
+    applied_coupon = None
+    if coupon_code:
+        code_str = str(coupon_code).strip().upper()
+        cp = db.coupons.find_one({"code": code_str})
+        now = current_time()
+        if cp and not cp.get("is_used") and (not cp.get("expires_at") or cp["expires_at"] > now):
+            owner_matches = not cp.get("owner_id") or cp.get("owner_id") == owner_id
+            min_spend = float(cp.get("minimum_order_amount", 0.0))
+            if owner_matches and cart_data["subtotal"] >= min_spend:
+                disc_val = float(cp.get("discount_value", 10.0))
+                if cp.get("discount_type") == "percentage":
+                    coupon_discount = round(min(cart_data["subtotal"] * (disc_val / 100.0), float(cp.get("maximum_discount", 999999.0))), 2)
+                else:
+                    coupon_discount = round(min(disc_val, cart_data["subtotal"]), 2)
+                applied_coupon = {
+                    "code": code_str,
+                    "discount_amount": coupon_discount,
+                    "discount_value": disc_val,
+                    "discount_type": cp.get("discount_type", "percentage"),
+                }
+
+    final_total = round(max(0.0, cart_data["subtotal"] - coupon_discount), 2)
 
     # All good. The totals below are calculated here, from current database prices.
     # Nothing the frontend sends (prices, totals) is used.
@@ -112,9 +144,11 @@ def checkout_validate(request):
             "items": cart_data["items"],
             "total_quantity": cart_data["total_quantity"],
             "subtotal": cart_data["subtotal"],
+            "coupon_discount": coupon_discount,
+            "coupon": applied_coupon,
             "delivery_charge": None,
             "delivery_charge_note": DELIVERY_CHARGE_NOTE,
-            "total": cart_data["subtotal"],  # delivery is not included because it is not decided yet
+            "total": final_total,
         }
     )
 
@@ -127,11 +161,53 @@ ADDRESS_FIELDS = ["full_name", "phone_number", "house_number", "street", "area",
 
 
 def order_to_json(order):
-    return {
-        "id": str(order["_id"]),
-        "order_number": order["order_number"],
-        "items": [
-            {
+    formatted_items = []
+    for item in order.get("items", []):
+        if item.get("is_hamper"):
+            formatted_items.append({
+                "is_hamper": True,
+                "hamper_id": item.get("hamper_id"),
+                "product_name": item.get("product_name", f"Custom Mithai Hamper ({item.get('box_size', 'Gift Box')})"),
+                "box_name": item.get("box_name"),
+                "box_size": item.get("box_size"),
+                "box_image": item.get("box_image"),
+                "packaging_price": item.get("packaging_price", 0.0),
+                "gift_wrap_price": item.get("gift_wrap_price", 0.0),
+                "customization": item.get("customization", {}),
+                "items": [
+                    {
+                        "product_id": str(s["product_id"]),
+                        "product_name": s["product_name"],
+                        "product_image": s.get("product_image", ""),
+                        "variant_weight": s["variant_weight"],
+                        "unit_price": s["unit_price"],
+                        "quantity": s["quantity"],
+                        "item_total": s["item_total"],
+                    }
+                    for s in item.get("items", [])
+                ],
+                "quantity": 1,
+                "item_total": item["item_total"],
+            })
+        elif item.get("is_bulk"):
+            formatted_items.append({
+                "is_bulk": True,
+                "is_hamper": False,
+                "product_id": str(item["product_id"]),
+                "product_name": item["product_name"],
+                "product_image": item.get("product_image", ""),
+                "variant_weight": item["variant_weight"],
+                "unit_price": item["unit_price"],
+                "quantity": item["quantity"],
+                "normal_total": item.get("normal_total", item["item_total"]),
+                "discount_percentage": item.get("discount_percentage", 0.0),
+                "discount_amount": item.get("discount_amount", 0.0),
+                "item_total": item["item_total"],
+                "total_weight_kg": item.get("total_weight_kg", 0.0),
+            })
+        else:
+            formatted_items.append({
+                "is_hamper": False,
                 "product_id": str(item["product_id"]),
                 "product_name": item["product_name"],
                 "product_image": item["product_image"],
@@ -139,11 +215,19 @@ def order_to_json(order):
                 "unit_price": item["unit_price"],
                 "quantity": item["quantity"],
                 "item_total": item["item_total"],
-            }
-            for item in order["items"]
-        ],
+            })
+
+    return {
+        "id": str(order["_id"]),
+        "order_number": order["order_number"],
+        "items": formatted_items,
         "delivery_address": order["delivery_address"],
         "subtotal": order["subtotal"],
+        "coupon_code": order.get("coupon_code"),
+        "coupon_discount": order.get("coupon_discount", 0.0),
+        "coupon_generated": order.get("coupon_generated"),
+        "is_wholesale_order": bool(order.get("is_wholesale_order", False)),
+        "wholesale_request_code": order.get("wholesale_request_code"),
         "delivery_charge": order["delivery_charge"],
         "delivery_charge_note": DELIVERY_CHARGE_NOTE if order["delivery_charge"] is None else "",
         "total_amount": order["total_amount"],
@@ -168,79 +252,206 @@ def build_order_lines(db, cart_items):
     lines = []
     problems = []
     for item in cart_items:
-        product = db.products.find_one({"_id": item["product_id"]})
-        variant = None
-        if product is not None:
-            variant = next((v for v in product["variants"] if v["weight"] == item["variant_weight"]), None)
+        if item.get("is_hamper"):
+            hamper_sweets = []
+            hamper_sweets_total = 0.0
+            for sweet in item.get("items", []):
+                p = db.products.find_one({"_id": sweet["product_id"]})
+                v = None
+                if p:
+                    v = next((v for v in p.get("variants", []) if v["weight"] == sweet["variant_weight"]), None)
 
-        name = product["name"] if product else item["product_name"]
-        reason = None
-        if product is None or not product["is_active"] or variant is None or not variant["is_available"]:
-            reason = "No longer available. Please remove it from your cart."
-        elif variant["stock"] < 1:
-            reason = "Out of stock. Please remove it from your cart."
-        elif item["quantity"] > variant["stock"]:
-            reason = f"Only {variant['stock']} left. Please lower the quantity."
+                name = p["name"] if p else sweet.get("product_name", "Sweet")
+                reason = None
+                if p is None or not p.get("is_active", True) or v is None or not v.get("is_available", True):
+                    reason = f"{name} ({sweet.get('variant_weight')}) in hamper is no longer available."
+                elif v.get("stock", 0) < 1:
+                    reason = f"{name} ({sweet.get('variant_weight')}) in hamper is out of stock."
+                elif sweet["quantity"] > v.get("stock", 0):
+                    reason = f"Only {v['stock']} left for {name} ({sweet.get('variant_weight')}) in hamper."
 
-        if reason:
-            problems.append({"product_name": name, "variant_weight": item["variant_weight"], "message": reason})
-            continue
+                if reason:
+                    problems.append({"product_name": name, "variant_weight": sweet["variant_weight"], "message": reason})
+                    continue
 
-        lines.append(
-            {
+                item_total = round(v["price"] * sweet["quantity"], 2)
+                hamper_sweets_total += item_total
+                hamper_sweets.append({
+                    "product_id": sweet["product_id"],
+                    "product_name": p["name"],
+                    "product_image": p.get("image_url", ""),
+                    "variant_weight": sweet["variant_weight"],
+                    "unit_price": v["price"],
+                    "quantity": sweet["quantity"],
+                    "item_total": item_total,
+                })
+
+            packaging_price = float(item.get("packaging_price", 0.0))
+            gift_wrap_price = float(item.get("gift_wrap_price", 0.0))
+            hamper_total = round(hamper_sweets_total + packaging_price + gift_wrap_price, 2)
+
+            lines.append({
+                "is_hamper": True,
+                "hamper_id": item.get("hamper_id"),
+                "product_name": f"Custom Mithai Hamper ({item.get('box_size', 'Gift Box')})",
+                "box_id": item.get("box_id"),
+                "box_name": item.get("box_name"),
+                "box_size": item.get("box_size"),
+                "box_image": item.get("box_image"),
+                "packaging_price": packaging_price,
+                "gift_wrap_price": gift_wrap_price,
+                "customization": item.get("customization", {}),
+                "items": hamper_sweets,
+                "quantity": 1,
+                "item_total": hamper_total,
+            })
+        elif item.get("is_bulk"):
+            product = db.products.find_one({"_id": item["product_id"]})
+            variant = None
+            if product is not None:
+                variant = next((v for v in product.get("variants", []) if v["weight"] == item["variant_weight"]), None)
+
+            name = product["name"] if product else item.get("product_name", "Sweet")
+            reason = None
+            if product is None or not product.get("is_active", True) or variant is None or not variant.get("is_available", True):
+                reason = "No longer available. Please remove it from your cart."
+            elif variant.get("stock", 0) < 1:
+                reason = "Out of stock. Please remove it from your cart."
+            elif item["quantity"] > variant.get("stock", 0):
+                reason = f"Only {variant['stock']} left. Please lower the quantity."
+
+            if reason:
+                problems.append({"product_name": name, "variant_weight": item["variant_weight"], "message": reason})
+                continue
+
+            from apps.core.bulk_views import calculate_item_bulk_discount, get_bulk_rules
+            from apps.core.hamper_views import parse_weight_to_grams
+            rules = get_bulk_rules(db)
+            grams = parse_weight_to_grams(item["variant_weight"])
+            calc = calculate_item_bulk_discount(grams, item["quantity"], variant["price"], rules)
+
+            lines.append({
+                "is_bulk": True,
+                "is_hamper": False,
                 "product_id": item["product_id"],
                 "product_name": product["name"],
-                "product_image": product["image_url"],
+                "product_image": product.get("image_url", ""),
                 "variant_weight": item["variant_weight"],
                 "unit_price": variant["price"],
                 "quantity": item["quantity"],
-                "item_total": round(variant["price"] * item["quantity"], 2),
-            }
-        )
+                "normal_total": calc["normal_total"],
+                "discount_percentage": calc["discount_percentage"],
+                "discount_amount": calc["discount_amount"],
+                "item_total": calc["discounted_total"],
+                "total_weight_kg": calc["total_weight_kg"],
+            })
+        else:
+            product = db.products.find_one({"_id": item["product_id"]})
+            variant = None
+            if product is not None:
+                variant = next((v for v in product["variants"] if v["weight"] == item["variant_weight"]), None)
+
+            name = product["name"] if product else item["product_name"]
+            reason = None
+            if product is None or not product["is_active"] or variant is None or not variant["is_available"]:
+                reason = "No longer available. Please remove it from your cart."
+            elif variant["stock"] < 1:
+                reason = "Out of stock. Please remove it from your cart."
+            elif item["quantity"] > variant["stock"]:
+                reason = f"Only {variant['stock']} left. Please lower the quantity."
+
+            if reason:
+                problems.append({"product_name": name, "variant_weight": item["variant_weight"], "message": reason})
+                continue
+
+            lines.append(
+                {
+                    "is_hamper": False,
+                    "product_id": item["product_id"],
+                    "product_name": product["name"],
+                    "product_image": product["image_url"],
+                    "variant_weight": item["variant_weight"],
+                    "unit_price": variant["price"],
+                    "quantity": item["quantity"],
+                    "item_total": round(variant["price"] * item["quantity"], 2),
+                }
+            )
     return lines, problems
 
 
 def reserve_stock(db, lines):
-    """Reduce stock for every line. Each reduction is ONE atomic MongoDB update that only
-    succeeds if enough stock is still there, so stock can never go below zero.
-    Returns (reserved_lines, problem). If a line fails, the caller must give back reserved_lines."""
+    """Reduce stock atomically for every item (normal items & hamper sweets).
+    Returns (reserved, problem). If a line fails, caller restores stock."""
     reserved = []
     for line in lines:
-        result = db.products.update_one(
-            {
-                "_id": line["product_id"],
-                "is_active": True,
-                "variants": {
-                    "$elemMatch": {
-                        "weight": line["variant_weight"],
-                        "is_available": True,
-                        "stock": {"$gte": line["quantity"]},
+        if line.get("is_hamper"):
+            for sweet in line.get("items", []):
+                result = db.products.update_one(
+                    {
+                        "_id": sweet["product_id"],
+                        "is_active": True,
+                        "variants": {
+                            "$elemMatch": {
+                                "weight": sweet["variant_weight"],
+                                "is_available": True,
+                                "stock": {"$gte": sweet["quantity"]},
+                            }
+                        },
+                    },
+                    {"$inc": {"variants.$.stock": -sweet["quantity"]}},
+                )
+                if result.modified_count != 1:
+                    problem = {
+                        "product_name": sweet["product_name"],
+                        "variant_weight": sweet["variant_weight"],
+                        "message": "Just sold out or not enough stock left. Please check your hamper.",
                     }
+                    return reserved, problem
+                reserved.append({
+                    "product_id": sweet["product_id"],
+                    "variant_weight": sweet["variant_weight"],
+                    "quantity": sweet["quantity"],
+                })
+        else:
+            result = db.products.update_one(
+                {
+                    "_id": line["product_id"],
+                    "is_active": True,
+                    "variants": {
+                        "$elemMatch": {
+                            "weight": line["variant_weight"],
+                            "is_available": True,
+                            "stock": {"$gte": line["quantity"]},
+                        }
+                    },
                 },
-            },
-            {"$inc": {"variants.$.stock": -line["quantity"]}},
-        )
-        if result.modified_count != 1:
-            problem = {
-                "product_name": line["product_name"],
+                {"$inc": {"variants.$.stock": -line["quantity"]}},
+            )
+            if result.modified_count != 1:
+                problem = {
+                    "product_name": line["product_name"],
+                    "variant_weight": line["variant_weight"],
+                    "message": "Just sold out or not enough stock left. Please check your cart.",
+                }
+                return reserved, problem
+            reserved.append({
+                "product_id": line["product_id"],
                 "variant_weight": line["variant_weight"],
-                "message": "Just sold out or not enough stock left. Please check your cart.",
-            }
-            return reserved, problem
-        reserved.append(line)
+                "quantity": line["quantity"],
+            })
     return reserved, None
 
 
-def restore_stock(db, lines):
+def restore_stock(db, reserved):
     """Give the stock back (used when an order could not be completed)."""
-    for line in lines:
+    for item in reserved:
         try:
             db.products.update_one(
-                {"_id": line["product_id"], "variants.weight": line["variant_weight"]},
-                {"$inc": {"variants.$.stock": line["quantity"]}},
+                {"_id": item["product_id"], "variants.weight": item["variant_weight"]},
+                {"$inc": {"variants.$.stock": item["quantity"]}},
             )
         except PyMongoError:
-            logger.error("Could not restore stock for %s %s", line["product_id"], line["variant_weight"])
+            logger.error("Could not restore stock for %s %s", item["product_id"], item["variant_weight"])
 
 
 @api_view(["POST"])
@@ -321,15 +532,37 @@ def order_create(request):
 
         # 6. Totals are calculated here from database prices. Nothing from the request is used.
         subtotal = round(sum(line["item_total"] for line in lines), 2)
+        coupon_discount = 0.0
+        applied_coupon_id = None
+        coupon_code = request.data.get("coupon_code")
         now = current_time()
+
+        if coupon_code:
+            code_str = str(coupon_code).strip().upper()
+            cp = db.coupons.find_one({"code": code_str})
+            if cp and not cp.get("is_used") and (not cp.get("expires_at") or cp["expires_at"] > now):
+                owner_matches = not cp.get("owner_id") or cp.get("owner_id") == owner_id
+                min_spend = float(cp.get("minimum_order_amount", 0.0))
+                if owner_matches and subtotal >= min_spend:
+                    disc_val = float(cp.get("discount_value", 10.0))
+                    if cp.get("discount_type") == "percentage":
+                        coupon_discount = round(min(subtotal * (disc_val / 100.0), float(cp.get("maximum_discount", 999999.0))), 2)
+                    else:
+                        coupon_discount = round(min(disc_val, subtotal), 2)
+                    applied_coupon_id = cp["_id"]
+
+        total_amount = round(max(0.0, subtotal - coupon_discount), 2)
+
         order = {
             "owner_id": owner_id,
             "items": lines,
             # A COPY of the address, so later address edits never change this order
             "delivery_address": {field: address[field] for field in ADDRESS_FIELDS},
             "subtotal": subtotal,
+            "coupon_code": str(coupon_code).strip().upper() if applied_coupon_id else None,
+            "coupon_discount": coupon_discount,
             "delivery_charge": None,  # no delivery rule exists yet
-            "total_amount": subtotal,
+            "total_amount": total_amount,
             "payment_method": PAYMENT_METHOD,
             "payment_status": PAYMENT_STATUS,
             "order_status": NEW_ORDER_STATUS,
@@ -350,6 +583,50 @@ def order_create(request):
             restore_stock(db, reserved)
             reserved = []
             return error_response("Could not create the order. Please try again.", status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        # Mark used coupon
+        if applied_coupon_id:
+            try:
+                db.coupons.update_one(
+                    {"_id": applied_coupon_id},
+                    {"$set": {"is_used": True, "used_at": now, "used_in_order_id": order["_id"]}}
+                )
+            except Exception as e:
+                logger.error("Could not mark coupon %s as used: %s", applied_coupon_id, e)
+
+        # Automatic Next-Purchase Coupon for qualifying hamper orders
+        has_hamper = any(l.get("is_hamper") for l in lines)
+        hamper_total = sum(l["item_total"] for l in lines if l.get("is_hamper"))
+        settings = db.hamper_settings.find_one({"key": "global_settings"}) or {}
+        min_qualifying = float(settings.get("min_order_amount_for_coupon", 1000.0))
+
+        if has_hamper and hamper_total >= min_qualifying:
+            random_suffix = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(4))
+            new_code = f"HAMPER10-{random_suffix}"
+            validity_days = int(settings.get("coupon_validity_days", 30))
+            coupon_doc = {
+                "code": new_code,
+                "owner_id": owner_id,
+                "source_order_id": order["_id"],
+                "discount_type": settings.get("coupon_discount_type", "percentage"),
+                "discount_value": float(settings.get("coupon_discount_value", 10.0)),
+                "minimum_order_amount": float(settings.get("coupon_min_order_amount", 500.0)),
+                "maximum_discount": float(settings.get("coupon_max_discount", 500.0)),
+                "expires_at": now + timedelta(days=validity_days),
+                "is_used": False,
+                "used_at": None,
+                "created_at": now,
+            }
+            db.coupons.insert_one(coupon_doc)
+            coupon_summary = {
+                "code": new_code,
+                "discount_value": coupon_doc["discount_value"],
+                "discount_type": coupon_doc["discount_type"],
+                "expires_at": coupon_doc["expires_at"].isoformat(),
+                "minimum_order_amount": coupon_doc["minimum_order_amount"],
+            }
+            db.orders.update_one({"_id": order["_id"]}, {"$set": {"coupon_generated": coupon_summary}})
+            order["coupon_generated"] = coupon_summary
 
         # 8. Only now, after the order is saved, empty the cart (and drop the lock)
         try:

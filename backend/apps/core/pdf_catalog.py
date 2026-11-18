@@ -1,5 +1,6 @@
 import io
 from datetime import datetime, timezone
+import qrcode
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -11,6 +12,7 @@ from reportlab.platypus import (
     TableStyle,
     HRFlowable,
     KeepTogether,
+    Image as RLImage,
 )
 from reportlab.pdfgen import canvas
 from config.mongodb import get_db
@@ -74,11 +76,31 @@ class NumberedCanvas(canvas.Canvas):
         self.restoreState()
 
 
+def create_qr_image_flowable(url="http://localhost:5173/catalog", size=60):
+    """Generates an in-memory QR code flowable for ReportLab."""
+    try:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=5,
+            border=1,
+        )
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="#542B24", back_color="#FFF8EC")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        return RLImage(buf, width=size, height=size)
+    except Exception:
+        return None
+
+
 def generate_catalog_pdf():
     """Builds a beautiful PDF product catalog for MithaiMart and returns bytes."""
     buffer = io.BytesIO()
 
-    # Document setup: A4 with 40pt side margins, 50pt top/bottom margins
+    # Document setup: A4 with 40pt side margins, 48pt top/bottom margins
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
@@ -98,35 +120,45 @@ def generate_catalog_pdf():
         fontSize=24,
         leading=28,
         textColor=COLOR_MAHOGANY,
-        alignment=1,  # Center
+        alignment=0,  # Left
     )
 
     tagline_style = ParagraphStyle(
         "CatalogTagline",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=10,
-        leading=13,
+        fontSize=9.5,
+        leading=12.5,
         textColor=COLOR_GOLD,
-        alignment=1,
+        alignment=0,
     )
 
     meta_style = ParagraphStyle(
         "CatalogMeta",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=8.5,
-        leading=11,
+        fontSize=8,
+        leading=10.5,
         textColor=COLOR_DARK_TEXT,
-        alignment=1,
+        alignment=0,
+    )
+
+    qr_label_style = ParagraphStyle(
+        "QRLabel",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        leading=8.5,
+        textColor=COLOR_RUST,
+        alignment=1,  # Center
     )
 
     category_heading_style = ParagraphStyle(
         "CatHeading",
         parent=styles["Normal"],
         fontName="Helvetica-Bold",
-        fontSize=13,
-        leading=16,
+        fontSize=12,
+        leading=15,
         textColor=COLOR_WHITE,
     )
 
@@ -186,28 +218,50 @@ def generate_catalog_pdf():
 
     elements = []
 
-    # 1. Header Banner
-    elements.append(Paragraph("MithaiMart", title_style))
-    elements.append(Spacer(1, 2))
-    elements.append(
-        Paragraph("AUTHENTIC DESI GHEE MITHAI & SAVOURIES • SINCE 1957", tagline_style)
-    )
-    elements.append(Spacer(1, 3))
+    # 1. Header Banner with QR Code
     gen_date = datetime.now(timezone.utc).strftime("%B %d, %Y")
-    elements.append(
+    header_left = [
+        Paragraph("MithaiMart", title_style),
+        Spacer(1, 2),
+        Paragraph("AUTHENTIC DESI GHEE MITHAI & SAVOURIES • SINCE 1957", tagline_style),
+        Spacer(1, 3),
         Paragraph(
             f"Official Price Catalog & Menu • Published {gen_date} • Pan-India Courier Delivery",
             meta_style,
+        ),
+    ]
+
+    qr_flowable = create_qr_image_flowable("http://localhost:5173/catalog", size=58)
+    if qr_flowable:
+        qr_right = [
+            qr_flowable,
+            Spacer(1, 1),
+            Paragraph("<b>SCAN TO VIEW ONLINE</b>", qr_label_style),
+        ]
+        header_table = Table([[header_left, qr_right]], colWidths=[435, 80])
+        header_table.setStyle(
+            TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (1, 0), (1, 0), "CENTER"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ])
         )
-    )
-    elements.append(Spacer(1, 10))
+        elements.append(header_table)
+    else:
+        for item in header_left:
+            elements.append(item)
+
+    elements.append(Spacer(1, 8))
     elements.append(
         HRFlowable(
             width="100%",
             thickness=1.2,
             color=COLOR_GOLD,
             spaceBefore=2,
-            spaceAfter=12,
+            spaceAfter=10,
         )
     )
 
@@ -236,8 +290,6 @@ def generate_catalog_pdf():
 
     categories.sort(key=get_order_key)
 
-    total_prods_count = 0
-
     for cat in categories:
         cat_id = cat["_id"]
         products = list(
@@ -245,8 +297,6 @@ def generate_catalog_pdf():
         )
         if not products:
             continue
-
-        total_prods_count += len(products)
 
         # Category Header Banner Table
         cat_title_p = Paragraph(f"{cat['name'].upper()}", category_heading_style)
@@ -332,14 +382,15 @@ def generate_catalog_pdf():
 
         prod_table.setStyle(TableStyle(table_styles))
         elements.append(prod_table)
-        elements.append(Spacer(1, 10))
+        elements.append(Spacer(1, 8))
 
-    # Summary End Note
+    # Summary End Note with QR Code
     end_box = [
         [
             Paragraph(
-                "<b>How to Order:</b> Visit <b>www.mithaimart.com</b> or call <b>+91 98765 43210</b>. "
-                "We deliver across 19,000+ Indian pincodes via BlueDart & DTDC with vacuum-sealed freshness guarantee.",
+                "<b>Scan & Order Online:</b> Scan the QR code above or visit <b>www.mithaimart.com</b>. "
+                "For bulk celebration inquiries or customized wedding hampers, call <b>+91 98765 43210</b>. "
+                "Pan-India courier delivery via BlueDart & DTDC with vacuum-sealed freshness guarantee.",
                 meta_style,
             )
         ]
