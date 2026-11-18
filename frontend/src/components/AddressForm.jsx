@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useContext, useState } from 'react'
+import { Crosshair } from 'lucide-react'
+import { LocationContext } from '../context/LocationContext'
 import api from '../services/api'
 import { getErrorMessage } from '../utils/helpers'
 
@@ -45,8 +47,20 @@ function checkValues(values) {
 // One form for "add" and "edit". If "address" is given we edit it, otherwise we add a new one.
 // onSaved(savedAddress) is called after the backend has saved it.
 export default function AddressForm({ address, onSaved, onCancel }) {
+  const { location, detectLocation } = useContext(LocationContext)
   const [values, setValues] = useState(() => {
-    if (!address) return emptyValues
+    if (!address) {
+      if (location && location.isDetected) {
+        return {
+          ...emptyValues,
+          city: location.city || '',
+          state: location.state || '',
+          pincode: location.pincode || '',
+          area: location.area || '',
+        }
+      }
+      return emptyValues
+    }
     const copy = { ...emptyValues }
     for (const field of Object.keys(emptyValues)) copy[field] = address[field]
     return copy
@@ -54,6 +68,25 @@ export default function AddressForm({ address, onSaved, onCancel }) {
   const [errors, setErrors] = useState({})
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [detecting, setDetecting] = useState(false)
+
+  async function handleAutoFillLocation() {
+    setDetecting(true)
+    let loc = location
+    if (!loc || !loc.isDetected) {
+      loc = await detectLocation(true)
+    }
+    if (loc) {
+      setValues((prev) => ({
+        ...prev,
+        city: loc.city || prev.city,
+        state: loc.state || prev.state,
+        pincode: loc.pincode || prev.pincode,
+        area: loc.area || prev.area,
+      }))
+    }
+    setDetecting(false)
+  }
 
   function handleChange(event) {
     const { name, value, type, checked } = event.target
@@ -111,7 +144,18 @@ export default function AddressForm({ address, onSaved, onCancel }) {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="rounded-xl border border-brand-gold/40 bg-brand-cream p-5">
-      <h2 className="text-xl font-semibold">{address ? 'Edit address' : 'Add a new address'}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-xl font-semibold">{address ? 'Edit address' : 'Add a new address'}</h2>
+        <button
+          type="button"
+          disabled={detecting}
+          onClick={handleAutoFillLocation}
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-[#9B4A32] hover:text-[#542B24] transition-colors bg-[#FFF8EC] border border-[#E8D5B5] px-3 py-1.5 rounded-full shadow-2xs hover:border-[#9B4A32] cursor-pointer disabled:opacity-60"
+        >
+          <Crosshair size={13} className="text-[#C99A42]" />
+          <span>{detecting ? 'Detecting...' : `Auto-fill with current location ${location?.city ? `(${location.city})` : ''}`}</span>
+        </button>
+      </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         {field('full_name', 'Full name')}

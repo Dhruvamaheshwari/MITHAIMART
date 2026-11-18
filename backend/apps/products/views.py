@@ -1,16 +1,21 @@
 """Category and Product APIs. Data lives in MongoDB (no Django models used)."""
 
+import math
+import os
 import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.errors import DuplicateKeyError
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import SAFE_METHODS, BasePermission
+from django.http import HttpResponse
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import SAFE_METHODS, AllowAny, BasePermission
 from rest_framework.response import Response
 
+from apps.products.image_upload import read_image_from_db
 from config.mongodb import get_db
 
 
@@ -67,6 +72,7 @@ def product_to_json(product):
         "category_id": str(product["category_id"]),
         "image_url": product["image_url"],
         "is_active": product["is_active"],
+        "state": product.get("state", ""),
         "variants": product["variants"],
         "created_at": product["created_at"].isoformat(),
     }
@@ -75,6 +81,46 @@ def product_to_json(product):
 def is_number(value):
     # bool is a subclass of int in Python, so True/False must be rejected separately
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+# Where a sweet or snack comes from. Optional on a product. Only these names are accepted.
+INDIAN_STATES = [
+    "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana",
+    "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Manipur",
+    "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana",
+    "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+    # union territories
+    "Andaman and Nicobar Islands", "Chandigarh", "Dadra and Nagar Haveli and Daman and Diu", "Delhi",
+    "Jammu and Kashmir", "Ladakh", "Lakshadweep", "Puducherry",
+]
+
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif")
+
+# A photo that ships with the website itself, for example /images/sweets/kaju-katli.jpg.
+# Only letters, digits, "-" and "_" are allowed in the folder and file names, so a path can never
+# climb out of the images folder (no "..") or point to another website ("//").
+PROJECT_IMAGE_PATH = re.compile(r"^/images/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*\.(jpg|jpeg|png|webp|gif|avif)$", re.IGNORECASE)
+
+
+def is_valid_image_url(value):
+    """An empty value is fine (image is optional). Otherwise it must be either
+    - a path to a photo of the website itself (/images/...), or
+    - an http(s) link with a host. If the link ends with a file type it must be an image type.
+      Links without a file type (many image services use them) are allowed."""
+    if not isinstance(value, str):
+        return False
+    value = value.strip()
+    if value == "":
+        return True
+    if len(value) > 500 or any(character.isspace() for character in value):
+        return False
+    if value.startswith("/"):
+        return bool(PROJECT_IMAGE_PATH.match(value))
+    parts = urlparse(value)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return False
+    extension = os.path.splitext(parts.path)[1].lower()
+    return extension == "" or extension in IMAGE_EXTENSIONS
 
 
 def read_text_fields(data, errors, required_name=True, required_description=False):
@@ -99,8 +145,11 @@ def read_text_fields(data, errors, required_name=True, required_description=Fals
         cleaned["description"] = description.strip()
 
     image_url = data.get("image_url", "")
-    if not isinstance(image_url, str) or (image_url and not image_url.startswith(("http://", "https://"))):
-        errors["image_url"] = "Image URL must start with http:// or https://."
+    if not is_valid_image_url(image_url):
+        errors["image_url"] = (
+            "Enter a valid http:// or https:// image link, or a project photo path like /images/sweets/barfi.jpg. "
+            "If it ends with a file type, use .jpg, .jpeg, .png, .webp, .gif or .avif."
+        )
     else:
         cleaned["image_url"] = image_url.strip()
 
@@ -244,6 +293,15 @@ def read_product_data(data, db):
     product = read_text_fields(data, errors, required_description=True)
     product["variants"] = read_variants(data.get("variants"), errors)
 
+    if "state" in data:
+        state = data["state"]
+        if state is None:
+            state = ""
+        if not isinstance(state, str) or (state.strip() and state.strip() not in INDIAN_STATES):
+            errors["state"] = "Choose a state from the list (or leave it empty)."
+        else:
+            product["state"] = state.strip()
+
     category_object_id = to_object_id(data.get("category_id"))
     if category_object_id is None:
         errors["category_id"] = "A valid category_id is required."
@@ -255,10 +313,21 @@ def read_product_data(data, db):
     return product, errors
 
 
+def can_buy(variant):
+    """Same rule as the customer pages: the weight is available and still in stock."""
+    return variant["is_available"] and variant["stock"] > 0
+
+
 def lowest_price(product):
-    """Starting price of a product (its cheapest variant). Used for price sorting."""
-    prices = [variant["price"] for variant in product["variants"]]
-    return min(prices) if prices else float("inf")
+    """Starting price = the cheapest weight a customer can actually buy. None if nothing can be bought."""
+    prices = [variant["price"] for variant in product["variants"] if can_buy(variant)]
+    return min(prices) if prices else None
+
+
+@api_view(["GET"])
+def state_list(request):
+    """The names the website can use in the state drop-downs."""
+    return Response(INDIAN_STATES)
 
 
 @api_view(["GET", "POST"])
@@ -272,6 +341,7 @@ def product_list(request):
         product, errors = read_product_data(request.data, db)
         if errors:
             return validation_error(errors)
+        product.setdefault("state", "")
         product["created_at"] = current_time()
         product["_id"] = db.products.insert_one(product).inserted_id
         return Response(product_to_json(product), status=status.HTTP_201_CREATED)
@@ -280,29 +350,57 @@ def product_list(request):
     params = request.query_params
     query = {"is_active": True}
 
-    # ?search=kaju  -> name contains "kaju" (not case sensitive)
+    # ?search=kaju  -> name contains "kaju" (or category matches search)
     search_text = params.get("search", "").strip()
+    if len(search_text) > 100:
+        return error_response("search must be 100 characters or less.", status.HTTP_400_BAD_REQUEST)
     if search_text:
-        query["name"] = {"$regex": re.escape(search_text), "$options": "i"}
+        matching_cats = [c["_id"] for c in db.categories.find({"name": {"$regex": re.escape(search_text), "$options": "i"}})]
+        if matching_cats:
+            query["$or"] = [
+                {"name": {"$regex": re.escape(search_text), "$options": "i"}},
+                {"category_id": {"$in": matching_cats}},
+            ]
+        else:
+            query["name"] = {"$regex": re.escape(search_text), "$options": "i"}
 
-    # ?category_id=<id>
+    # ?category_id=<id> (single id or comma-separated ids)
     category_text = params.get("category_id")
     if category_text:
-        category_object_id = to_object_id(category_text)
-        if category_object_id is None:
+        parts = [p.strip() for p in category_text.split(",") if p.strip()]
+        object_ids = [to_object_id(p) for p in parts]
+        if not object_ids or any(oid is None for oid in object_ids):
             return error_response("Invalid category_id.", status.HTTP_400_BAD_REQUEST)
-        query["category_id"] = category_object_id
+        if len(object_ids) == 1:
+            query["category_id"] = object_ids[0]
+        else:
+            query["category_id"] = {"$in": object_ids}
 
-    # ?min_price=200&max_price=600 -> at least one variant must fall inside the price range
+    # ?state=Rajasthan -> only sweets from that state
+    state_text = params.get("state", "").strip()
+    if state_text:
+        if state_text not in INDIAN_STATES:
+            return error_response("Unknown state.", status.HTTP_400_BAD_REQUEST)
+        query["state"] = state_text
+
+    # ?min_price=200&max_price=600 -> at least one weight that can be bought must be inside the range.
+    # The prices come from the variants saved in MongoDB, nothing from the browser is trusted as product data.
     price_range = {}
     for param_name, mongo_operator in (("min_price", "$gte"), ("max_price", "$lte")):
         if params.get(param_name):
             try:
-                price_range[mongo_operator] = float(params[param_name])
+                price = float(params[param_name])
             except ValueError:
                 return error_response(f"{param_name} must be a number.", status.HTTP_400_BAD_REQUEST)
+            if not math.isfinite(price) or price < 0:
+                return error_response(f"{param_name} must be a number, 0 or more.", status.HTTP_400_BAD_REQUEST)
+            price_range[mongo_operator] = price
+    if "$gte" in price_range and "$lte" in price_range and price_range["$gte"] > price_range["$lte"]:
+        return error_response("min_price cannot be more than max_price.", status.HTTP_400_BAD_REQUEST)
     if price_range:
-        query["variants"] = {"$elemMatch": {"price": price_range}}
+        query["variants"] = {
+            "$elemMatch": {"price": price_range, "is_available": True, "stock": {"$gt": 0}}
+        }
 
     # ?sort=price_asc or ?sort=price_desc
     sort_option = params.get("sort", "")
@@ -311,7 +409,9 @@ def product_list(request):
 
     products = list(db.products.find(query).sort("created_at", -1))  # newest first by default
     if sort_option:
-        products.sort(key=lowest_price, reverse=(sort_option == "price_desc"))
+        # Sort by starting price. Products that cannot be bought right now always go to the end.
+        direction = 1 if sort_option == "price_asc" else -1
+        products.sort(key=lambda product: (lowest_price(product) is None, direction * (lowest_price(product) or 0)))
 
     return Response([product_to_json(product) for product in products])
 
@@ -337,6 +437,16 @@ def product_detail(request, product_id):
     if request.method == "PUT":
         if not isinstance(request.data, dict):
             return error_response("Send a JSON object.", status.HTTP_400_BAD_REQUEST)
+        # A variant sent WITHOUT "stock" keeps its current stock (matched by weight). This way editing
+        # a product's price or name can never overwrite stock that changed because of a new order.
+        # Stock is changed on purpose through the admin stock API.
+        current_stock = {variant["weight"]: variant["stock"] for variant in product["variants"]}
+        if isinstance(request.data.get("variants"), list):
+            for variant in request.data["variants"]:
+                if isinstance(variant, dict) and "stock" not in variant and isinstance(variant.get("weight"), str):
+                    if variant["weight"].strip() in current_stock:
+                        variant["stock"] = current_stock[variant["weight"].strip()]
+
         changes, errors = read_product_data(request.data, db)
         if errors:
             return validation_error(errors)
@@ -346,3 +456,18 @@ def product_detail(request, product_id):
     # DELETE
     db.products.delete_one({"_id": object_id})
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def image_file(request, image_id):
+    """Public: show an image that an admin uploaded into the database."""
+    found = read_image_from_db(image_id)
+    if found is None:
+        return error_response("Image not found.", status.HTTP_404_NOT_FOUND)
+    content_type, data = found
+    response = HttpResponse(data, content_type=content_type)
+    response["Cache-Control"] = "public, max-age=86400"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response

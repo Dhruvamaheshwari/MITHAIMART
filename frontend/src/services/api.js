@@ -36,10 +36,58 @@ function getGuestId() {
   }
 }
 
-// Runs before every request and adds the guest id header
+// --- Customer login token ---
+// After logging in or signing up the backend gives us a token. We keep ONLY the token (never the password)
+// in localStorage so the customer stays logged in for a few days. Trade-off: a script injected into the
+// page could read it, so never put untrusted HTML in the site. "Log out" removes it.
+const CUSTOMER_TOKEN_KEY = 'mithaimart_customer_token'
+
+export function getCustomerToken() {
+  try {
+    return localStorage.getItem(CUSTOMER_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setCustomerToken(token) {
+  try {
+    localStorage.setItem(CUSTOMER_TOKEN_KEY, token)
+  } catch {
+    // if the browser blocks storage, the customer simply stays logged in until the page is closed
+  }
+}
+
+export function clearCustomerToken() {
+  try {
+    localStorage.removeItem(CUSTOMER_TOKEN_KEY)
+  } catch {
+    // nothing to remove
+  }
+}
+
+// Runs before every request: adds the guest id, and the login token when the customer is logged in.
+// Logged in = the backend uses the account. Not logged in = the backend uses the guest id.
 api.interceptors.request.use((config) => {
   config.headers['X-Guest-ID'] = getGuestId()
+  const token = getCustomerToken()
+  const isLoginOrSignUp = config.url === '/auth/login/' || config.url === '/auth/register/'
+  if (token && !isLoginOrSignUp) config.headers.Authorization = `Bearer ${token}`
   return config
 })
+
+// If the backend says our token is no good (expired, or the account is gone), forget it and reload:
+// the customer is then simply a guest again instead of seeing errors everywhere.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const sentToken = error.config && error.config.headers && error.config.headers.get('Authorization')
+    if (error.response && error.response.status === 401 && sentToken) {
+      clearCustomerToken()
+      window.location.reload()
+    }
+    return Promise.reject(error)
+  },
+)
 
 export default api

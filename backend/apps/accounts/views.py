@@ -1,8 +1,8 @@
-"""Address APIs (guest addresses).
+"""Address APIs.
 
-There is no customer login yet, so addresses belong to the guest id sent in the
-X-Guest-ID header (same idea as the cart). Every database query includes the guest id,
-so one guest can never read or change another guest's addresses.
+Addresses belong to an owner: a logged-in customer (Bearer token) or a guest browser (X-Guest-ID header).
+See customer_auth.py. Every database query includes the owner id, so nobody can read or change
+another owner's addresses.
 """
 
 import re
@@ -11,7 +11,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes
 from rest_framework.response import Response
 
-from apps.cart.views import missing_guest_id, read_guest_id
+from apps.accounts.customer_auth import get_owner
 from apps.products.views import current_time, error_response, to_object_id, validation_error
 from config.mongodb import get_db
 
@@ -102,14 +102,14 @@ def validate_address(data):
 @api_view(["GET", "POST"])
 @authentication_classes([])
 def address_list(request):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
     db = get_db()
 
     if request.method == "GET":
         # Only this guest's addresses. Default address first, then newest.
-        addresses = db.addresses.find({"guest_id": guest_id}).sort([("is_default", -1), ("created_at", -1)])
+        addresses = db.addresses.find({"owner_id": owner_id}).sort([("is_default", -1), ("created_at", -1)])
         return Response([address_to_json(address) for address in addresses])
 
     # POST: add a new address
@@ -119,7 +119,7 @@ def address_list(request):
     if errors:
         return validation_error(errors)
 
-    saved_count = db.addresses.count_documents({"guest_id": guest_id})
+    saved_count = db.addresses.count_documents({"owner_id": owner_id})
     if saved_count >= MAX_ADDRESSES:
         return error_response(f"You can save up to {MAX_ADDRESSES} addresses.", status.HTTP_409_CONFLICT)
 
@@ -128,10 +128,10 @@ def address_list(request):
         cleaned["is_default"] = True
     # Only one default per guest: remove the old default before saving the new one
     if cleaned["is_default"]:
-        db.addresses.update_many({"guest_id": guest_id}, {"$set": {"is_default": False}})
+        db.addresses.update_many({"owner_id": owner_id}, {"$set": {"is_default": False}})
 
     now = current_time()
-    cleaned.update({"guest_id": guest_id, "created_at": now, "updated_at": now})
+    cleaned.update({"owner_id": owner_id, "created_at": now, "updated_at": now})
     cleaned["_id"] = db.addresses.insert_one(cleaned).inserted_id
     return Response(address_to_json(cleaned), status=status.HTTP_201_CREATED)
 
@@ -139,9 +139,9 @@ def address_list(request):
 @api_view(["GET", "PUT", "DELETE"])
 @authentication_classes([])
 def address_detail(request, address_id):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
     object_id = to_object_id(address_id)
     if object_id is None:
         return error_response("Invalid address id.", status.HTTP_400_BAD_REQUEST)
@@ -149,7 +149,7 @@ def address_detail(request, address_id):
     db = get_db()
     # Ownership check: the guest id is part of the query. Another guest's address is simply
     # "not found" (404), so we do not even reveal that it exists.
-    address = db.addresses.find_one({"_id": object_id, "guest_id": guest_id})
+    address = db.addresses.find_one({"_id": object_id, "owner_id": owner_id})
     if address is None:
         return error_response("Address not found.", status.HTTP_404_NOT_FOUND)
 
@@ -168,18 +168,18 @@ def address_detail(request, address_id):
             cleaned["is_default"] = True
         elif cleaned["is_default"]:
             db.addresses.update_many(
-                {"guest_id": guest_id, "_id": {"$ne": object_id}}, {"$set": {"is_default": False}}
+                {"owner_id": owner_id, "_id": {"$ne": object_id}}, {"$set": {"is_default": False}}
             )
 
         cleaned["updated_at"] = current_time()
-        db.addresses.update_one({"_id": object_id, "guest_id": guest_id}, {"$set": cleaned})
+        db.addresses.update_one({"_id": object_id, "owner_id": owner_id}, {"$set": cleaned})
         return Response(address_to_json(db.addresses.find_one({"_id": object_id})))
 
     # DELETE
-    db.addresses.delete_one({"_id": object_id, "guest_id": guest_id})
+    db.addresses.delete_one({"_id": object_id, "owner_id": owner_id})
     if address["is_default"]:
         # Make the newest remaining address the new default
-        newest = db.addresses.find_one({"guest_id": guest_id}, sort=[("created_at", -1)])
+        newest = db.addresses.find_one({"owner_id": owner_id}, sort=[("created_at", -1)])
         if newest:
             db.addresses.update_one({"_id": newest["_id"]}, {"$set": {"is_default": True}})
     return Response(status=status.HTTP_204_NO_CONTENT)

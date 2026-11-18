@@ -1,18 +1,16 @@
 """Shopping cart APIs.
 
-There is no customer login yet, so every browser gets a random guest id
-(sent in the X-Guest-ID header). The cart is saved in MongoDB under that id.
-Guest users are NOT authenticated users: the guest id only identifies a cart.
+A cart belongs to an owner: a logged-in customer (Bearer token) or a guest browser (X-Guest-ID header).
+See apps/accounts/customer_auth.py. Guests are NOT logged-in users: the guest id only identifies a cart.
 
 The price is NEVER taken from the request. It is always read from the product in MongoDB.
 """
-
-import uuid
 
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes
 from rest_framework.response import Response
 
+from apps.accounts.customer_auth import get_owner
 from apps.products.views import current_time, error_response, to_object_id
 from config.mongodb import get_db
 
@@ -21,12 +19,35 @@ from config.mongodb import get_db
 # Helper functions
 # ---------------------------------------------------------------------------
 
-def read_guest_id(request):
-    """Return the guest id from the X-Guest-ID header, or None if it is missing or not a UUID."""
-    try:
-        return str(uuid.UUID(request.headers.get("X-Guest-ID", "")))
-    except ValueError:
-        return None
+def merge_cart_into(db, from_owner_id, to_owner_id):
+    """Move the items of one cart into another one. Used when a guest logs in, so the items the guest
+    collected are not lost. Quantities are added together but never above the stock, and items that
+    can no longer be bought are skipped. Afterwards the guest cart is emptied."""
+    from_cart = db.carts.find_one({"owner_id": from_owner_id})
+    if not from_cart or not from_cart["items"]:
+        return
+    to_cart = db.carts.find_one({"owner_id": to_owner_id})
+    items = to_cart["items"] if to_cart else []
+
+    for guest_item in from_cart["items"]:
+        product = db.products.find_one({"_id": guest_item["product_id"]})
+        if product is None or not product["is_active"]:
+            continue
+        variant = next((v for v in product["variants"] if v["weight"] == guest_item["variant_weight"]), None)
+        if variant is None or not variant["is_available"] or variant["stock"] < 1:
+            continue
+
+        existing = find_item(items, guest_item["product_id"], guest_item["variant_weight"])
+        wanted = guest_item["quantity"] + (existing["quantity"] if existing else 0)
+        quantity = min(wanted, variant["stock"])
+        if existing is None:
+            existing = {"product_id": guest_item["product_id"], "variant_weight": guest_item["variant_weight"]}
+            items.append(existing)
+        existing["quantity"] = quantity
+        refresh_snapshot(existing, product, variant)
+
+    save_items(db, to_owner_id, items)
+    save_items(db, from_owner_id, [])
 
 
 def read_item_request(data, quantity_required):
@@ -73,11 +94,11 @@ def find_item(items, product_object_id, weight):
     return None
 
 
-def save_items(db, guest_id, items):
+def save_items(db, owner_id, items):
     """Save the cart. upsert=True creates the cart document the first time."""
     now = current_time()
     db.carts.update_one(
-        {"guest_id": guest_id},
+        {"owner_id": owner_id},
         {"$set": {"items": items, "updated_at": now}, "$setOnInsert": {"created_at": now}},
         upsert=True,
     )
@@ -135,10 +156,6 @@ def cart_to_json(db, cart):
     return {"items": result_items, "total_quantity": total_quantity, "subtotal": round(subtotal, 2)}
 
 
-def missing_guest_id():
-    return error_response("A valid X-Guest-ID header is required.", status.HTTP_400_BAD_REQUEST)
-
-
 # ---------------------------------------------------------------------------
 # Cart APIs  (authentication_classes([]) = no login needed, guest id only)
 # ---------------------------------------------------------------------------
@@ -146,19 +163,19 @@ def missing_guest_id():
 @api_view(["GET"])
 @authentication_classes([])
 def cart_detail(request):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
     db = get_db()
-    return Response(cart_to_json(db, db.carts.find_one({"guest_id": guest_id})))
+    return Response(cart_to_json(db, db.carts.find_one({"owner_id": owner_id})))
 
 
 @api_view(["POST"])
 @authentication_classes([])
 def cart_add(request):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
     product_object_id, weight, quantity, error = read_item_request(request.data, quantity_required=False)
     if error:
         return error
@@ -168,7 +185,7 @@ def cart_add(request):
     if error:
         return error
 
-    cart = db.carts.find_one({"guest_id": guest_id})
+    cart = db.carts.find_one({"owner_id": owner_id})
     items = cart["items"] if cart else []
     item = find_item(items, product_object_id, weight)
 
@@ -187,22 +204,22 @@ def cart_add(request):
     item["quantity"] = new_quantity
     refresh_snapshot(item, product, variant)
 
-    save_items(db, guest_id, items)
+    save_items(db, owner_id, items)
     return Response(cart_to_json(db, {"items": items}))
 
 
 @api_view(["PUT"])
 @authentication_classes([])
 def cart_update(request):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
     product_object_id, weight, quantity, error = read_item_request(request.data, quantity_required=True)
     if error:
         return error
 
     db = get_db()
-    cart = db.carts.find_one({"guest_id": guest_id})
+    cart = db.carts.find_one({"owner_id": owner_id})
     items = cart["items"] if cart else []
     item = find_item(items, product_object_id, weight)
     if item is None:
@@ -216,38 +233,38 @@ def cart_update(request):
 
     item["quantity"] = quantity
     refresh_snapshot(item, product, variant)
-    save_items(db, guest_id, items)
+    save_items(db, owner_id, items)
     return Response(cart_to_json(db, {"items": items}))
 
 
 @api_view(["DELETE"])
 @authentication_classes([])
 def cart_remove(request, product_id, variant_weight):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
     product_object_id = to_object_id(product_id)
     if product_object_id is None:
         return error_response("Invalid product id.", status.HTTP_400_BAD_REQUEST)
 
     db = get_db()
-    cart = db.carts.find_one({"guest_id": guest_id})
+    cart = db.carts.find_one({"owner_id": owner_id})
     items = cart["items"] if cart else []
     item = find_item(items, product_object_id, variant_weight)
     if item is None:
         return error_response("This item is not in your cart.", status.HTTP_404_NOT_FOUND)
 
     items.remove(item)
-    save_items(db, guest_id, items)
+    save_items(db, owner_id, items)
     return Response(cart_to_json(db, {"items": items}))
 
 
 @api_view(["DELETE"])
 @authentication_classes([])
 def cart_clear(request):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
     db = get_db()
-    save_items(db, guest_id, [])
+    save_items(db, owner_id, [])
     return Response(cart_to_json(db, {"items": []}))

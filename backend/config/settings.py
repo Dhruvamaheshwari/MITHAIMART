@@ -6,6 +6,7 @@ All secrets and environment-specific values come from environment variables
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from corsheaders.defaults import default_headers
@@ -121,8 +122,18 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
-    # Admin APIs log in with a Django staff account (HTTP Basic auth for now)
-    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.BasicAuthentication"],
+    # Admins log in with a Django staff account. The website uses a short-lived token (JWT).
+    # Basic auth (username + password on every request) is kept only for API tools like Postman.
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "apps.core.authentication.TolerantJWTAuthentication",
+        "rest_framework.authentication.BasicAuthentication",
+    ],
+    # Limits password guessing on the admin login
+    "DEFAULT_THROTTLE_RATES": {
+        "admin_login": "10/min",
+        "customer_login": "10/min",
+        "customer_register": "10/hour",
+    },
     # Turns MongoDB errors into a safe 503 response
     "EXCEPTION_HANDLER": "apps.core.exceptions.api_exception_handler",
 }
@@ -131,3 +142,23 @@ REST_FRAMEWORK = {
 CORS_ALLOWED_ORIGINS = get_list("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
 # The cart sends its guest id in this extra header, so the browser must be allowed to send it.
 CORS_ALLOW_HEADERS = list(default_headers) + ["x-guest-id"]
+
+# Admin login token: the website keeps it only until the browser tab is closed.
+ADMIN_TOKEN_MINUTES = 60
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=ADMIN_TOKEN_MINUTES),
+    "AUTH_HEADER_TYPES": ("Bearer",),
+}
+
+# Customer login token lifetime. The website keeps the token (never the password) in the browser.
+CUSTOMER_TOKEN_DAYS = 7
+
+# A variant with this much stock or less is shown as "low stock" in the admin pages.
+# Change it in .env (LOW_STOCK_THRESHOLD) instead of editing code.
+LOW_STOCK_THRESHOLD = int(get_env("LOW_STOCK_THRESHOLD", "5"))
+
+# Cloudinary stores the product images (the image files are NOT stored in MongoDB).
+# The secret stays on the server. It is never sent to the website. Fill these in backend/.env.
+CLOUDINARY_CLOUD_NAME = get_env("CLOUDINARY_CLOUD_NAME", "")
+CLOUDINARY_API_KEY = get_env("CLOUDINARY_API_KEY", "")
+CLOUDINARY_API_SECRET = get_env("CLOUDINARY_API_SECRET", "")

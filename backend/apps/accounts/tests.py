@@ -7,6 +7,19 @@ from config.mongodb import get_db
 
 TEST_DB_NAME = "mithaimart_test"  # separate database, real data is never touched
 
+def make_customer_token(email):
+    """Test helper: put a customer into MongoDB and return (owner_id, login token)."""
+    from datetime import datetime, timezone
+
+    from apps.accounts.customer_auth import create_customer_token
+
+    now = datetime.now(timezone.utc)
+    user_id = get_db().users.insert_one(
+        {"name": "Test Customer", "email": email, "password_hash": "unused", "is_active": True, "created_at": now, "updated_at": now}
+    ).inserted_id
+    return f"user:{user_id}", create_customer_token(user_id)
+
+
 VALID_ADDRESS = {
     "full_name": "Asha Verma",
     "phone_number": "9876543210",
@@ -26,7 +39,7 @@ class AddressApiTests(APITestCase):
         db = get_db()
         db.client.drop_database(TEST_DB_NAME)
         db.addresses.create_index(
-            "guest_id", unique=True, partialFilterExpression={"is_default": True}, name="one_default_per_guest"
+            "owner_id", unique=True, partialFilterExpression={"is_default": True}, name="one_default_per_owner"
         )
         self.guest_id = str(uuid.uuid4())
         self.other_guest_id = str(uuid.uuid4())
@@ -57,11 +70,11 @@ class AddressApiTests(APITestCase):
         address = response.json()
         self.assertEqual(address["full_name"], "Asha Verma")
         self.assertEqual(address["landmark"], "Near the park")
-        self.assertNotIn("guest_id", address)  # internal field is not exposed
+        self.assertNotIn("owner_id", address)  # internal field is not exposed
         detail = self.call("get", f"/api/addresses/{address['id']}/")
         self.assertEqual(detail.status_code, 200)
         saved = get_db().addresses.find_one({})
-        self.assertEqual(saved["guest_id"], self.guest_id)
+        self.assertEqual(saved["owner_id"], f"guest:{self.guest_id}")
         self.assertIn("created_at", saved)
         self.assertIn("updated_at", saved)
 

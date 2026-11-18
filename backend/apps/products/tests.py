@@ -211,5 +211,162 @@ class ProductApiTests(APITestCase):
         self.assertEqual(names("?sort=price_desc"), ["Kaju Katli", "Gulab Jamun", "Aloo Bhujia"])
 
     def test_bad_query_values(self):
-        for query in ("?min_price=abc", "?category_id=xyz", "?sort=cheap"):
+        for query in (
+            "?min_price=abc",
+            "?category_id=xyz",
+            "?sort=cheap",
+            "?min_price=-5",
+            "?max_price=-1",
+            "?min_price=nan",
+            "?max_price=inf",
+            "?min_price=500&max_price=100",
+            "?search=" + "a" * 101,
+        ):
             self.assertEqual(self.client.get("/api/products/" + query).status_code, 400, query)
+
+    def test_price_filter_and_sort_use_only_weights_that_can_be_bought(self):
+        """A sold-out cheap weight must not make a product match a cheap price filter or sort first."""
+        sweets = self.make_category("Fresh Sweets")
+        db = get_db()
+        # Cheap weight (100) is sold out. The weight that can be bought costs 600.
+        self.make_product(sweets["id"], "Sold Out Cheap", prices=(100, 600))
+        db.products.update_one({"name": "Sold Out Cheap"}, {"$set": {"variants.0.stock": 0}})
+        # The cheap weight (150) is hidden by the shop. The weight that can be bought costs 700.
+        self.make_product(sweets["id"], "Hidden Cheap", prices=(150, 700))
+        db.products.update_one({"name": "Hidden Cheap"}, {"$set": {"variants.0.is_available": False}})
+        self.make_product(sweets["id"], "Normal", prices=(300,))
+        # nothing at all can be bought
+        self.make_product(sweets["id"], "Nothing Left", prices=(50,))
+        db.products.update_one({"name": "Nothing Left"}, {"$set": {"variants.0.stock": 0}})
+
+        def names(query):
+            response = self.client.get("/api/products/" + query)
+            self.assertEqual(response.status_code, 200, response.content)
+            return [item["name"] for item in response.json()]
+
+        self.assertEqual(names("?max_price=200"), [])  # the only cheap weights cannot be bought
+        self.assertEqual(sorted(names("?max_price=350")), ["Normal"])
+        self.assertEqual(sorted(names("?min_price=500")), ["Hidden Cheap", "Sold Out Cheap"])
+        # sorted by the cheapest weight that CAN be bought, and unbuyable products always last
+        self.assertEqual(names("?sort=price_asc"), ["Normal", "Sold Out Cheap", "Hidden Cheap", "Nothing Left"])
+        self.assertEqual(names("?sort=price_desc"), ["Hidden Cheap", "Sold Out Cheap", "Normal", "Nothing Left"])
+
+    def test_search_category_price_and_sort_work_together(self):
+        sweets = self.make_category("Fresh Sweets")
+        snacks = self.make_category("Namkeen")
+        self.make_product(sweets["id"], "Kaju Katli", prices=(250, 1000))
+        self.make_product(sweets["id"], "Kaju Roll", prices=(400,))
+        self.make_product(sweets["id"], "Gulab Jamun", prices=(120,))
+        self.make_product(snacks["id"], "Kaju Mixture", prices=(90,))
+
+        def names(query):
+            response = self.client.get("/api/products/" + query)
+            self.assertEqual(response.status_code, 200, response.content)
+            return [item["name"] for item in response.json()]
+
+        # "kaju" + sweets + price 200 to 500 + cheapest first
+        query = f"?search=kaju&category_id={sweets['id']}&min_price=200&max_price=500&sort=price_asc"
+        self.assertEqual(names(query), ["Kaju Katli", "Kaju Roll"])
+        # same filters but most expensive first
+        self.assertEqual(names(query.replace("price_asc", "price_desc")), ["Kaju Roll", "Kaju Katli"])
+        # a combination with no match gives an empty list, not an error
+        self.assertEqual(names(f"?search=kaju&category_id={snacks['id']}&min_price=200"), [])
+        self.assertEqual(names("?search=rasgulla"), [])
+
+    # origin state ------------------------------------------------------------
+    def state_body(self, category_id, name="Ghevar", **extra):
+        return {
+            "name": name,
+            "description": "x",
+            "category_id": category_id,
+            "variants": [{"weight": "500g", "price": 450, "stock": 5}],
+            **extra,
+        }
+
+    def test_state_list_is_public_and_complete(self):
+        response = self.client.get("/api/states/")
+        self.assertEqual(response.status_code, 200)
+        states = response.json()
+        self.assertEqual(len(states), 36)  # 28 states and 8 union territories
+        for name in ("Rajasthan", "West Bengal", "Tamil Nadu", "Delhi", "Ladakh"):
+            self.assertIn(name, states)
+        self.assertEqual(len(states), len(set(states)))
+
+    def test_product_can_have_a_valid_state_and_defaults_to_empty(self):
+        category = self.make_category()
+        with_state = self.client.post(
+            "/api/products/", self.state_body(category["id"], state="Rajasthan"), format="json", HTTP_AUTHORIZATION=self.admin_auth
+        )
+        self.assertEqual(with_state.status_code, 201, with_state.content)
+        self.assertEqual(with_state.json()["state"], "Rajasthan")
+        without = self.client.post(
+            "/api/products/", self.state_body(category["id"], name="No State"), format="json", HTTP_AUTHORIZATION=self.admin_auth
+        )
+        self.assertEqual(without.json()["state"], "")
+        self.assertEqual(get_db().products.find_one({"name": "No State"})["state"], "")
+
+    def test_invalid_states_are_rejected(self):
+        category = self.make_category()
+        for bad in ("Atlantis", "rajasthan", "Rajasthan ; drop", 5, ["Goa"], {"x": 1}, True):
+            response = self.client.post(
+                "/api/products/", self.state_body(category["id"], state=bad), format="json", HTTP_AUTHORIZATION=self.admin_auth
+            )
+            self.assertEqual(response.status_code, 400, bad)
+            self.assertIn("state", response.json()["details"])
+        self.assertEqual(get_db().products.count_documents({}), 0)
+
+    def test_editing_without_a_state_keeps_the_saved_state(self):
+        category = self.make_category()
+        created = self.client.post(
+            "/api/products/", self.state_body(category["id"], state="Gujarat"), format="json", HTTP_AUTHORIZATION=self.admin_auth
+        ).json()
+        # an edit that does not mention the state (like the old admin toggle) must not erase it
+        edited = self.client.put(
+            f"/api/products/{created['id']}/",
+            self.state_body(category["id"], name="Ghevar Special"),
+            format="json",
+            HTTP_AUTHORIZATION=self.admin_auth,
+        )
+        self.assertEqual(edited.json()["state"], "Gujarat")
+        # an edit that sends a new state changes it, and an empty one clears it
+        changed = self.client.put(
+            f"/api/products/{created['id']}/",
+            self.state_body(category["id"], state="Goa"),
+            format="json",
+            HTTP_AUTHORIZATION=self.admin_auth,
+        )
+        self.assertEqual(changed.json()["state"], "Goa")
+        cleared = self.client.put(
+            f"/api/products/{created['id']}/",
+            self.state_body(category["id"], state=""),
+            format="json",
+            HTTP_AUTHORIZATION=self.admin_auth,
+        )
+        self.assertEqual(cleared.json()["state"], "")
+
+    def test_products_saved_before_the_state_field_existed_still_work(self):
+        category = self.make_category()
+        product = self.make_product(category["id"], "Old Product")
+        get_db().products.update_one({"name": "Old Product"}, {"$unset": {"state": ""}})
+        self.assertEqual(self.client.get(f"/api/products/{product['id']}/").json()["state"], "")
+        self.assertEqual(len(self.client.get("/api/products/").json()), 1)
+
+    def test_state_filter_works_with_the_other_filters(self):
+        category = self.make_category()
+        for name, state in (("Ghevar", "Rajasthan"), ("Mawa Kachori", "Rajasthan"), ("Mysore Pak", "Karnataka"), ("Plain", "")):
+            self.client.post(
+                "/api/products/", self.state_body(category["id"], name=name, state=state), format="json", HTTP_AUTHORIZATION=self.admin_auth
+            )
+
+        def names(query):
+            response = self.client.get("/api/products/" + query)
+            self.assertEqual(response.status_code, 200, response.content)
+            return sorted(item["name"] for item in response.json())
+
+        self.assertEqual(names("?state=Rajasthan"), ["Ghevar", "Mawa Kachori"])
+        self.assertEqual(names("?state=Karnataka"), ["Mysore Pak"])
+        self.assertEqual(names("?state=Goa"), [])
+        self.assertEqual(names("?state=Rajasthan&search=kachori"), ["Mawa Kachori"])
+        self.assertEqual(names(f"?state=Rajasthan&category_id={category['id']}&max_price=500"), ["Ghevar", "Mawa Kachori"])
+        for bad in ("Atlantis", "rajasthan", "Rajasthan%27"):
+            self.assertEqual(self.client.get("/api/products/?state=" + bad).status_code, 400, bad)

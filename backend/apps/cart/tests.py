@@ -14,7 +14,7 @@ class CartApiTests(APITestCase):
     def setUp(self):
         db = get_db()
         db.client.drop_database(TEST_DB_NAME)
-        db.carts.create_index("guest_id", unique=True)
+        db.carts.create_index("owner_id", unique=True)
         self.guest_id = str(uuid.uuid4())
 
         category_id = db.categories.insert_one({"name": "Sweets", "is_active": True}).inserted_id
@@ -69,7 +69,7 @@ class CartApiTests(APITestCase):
         self.assertEqual(data["total_quantity"], 2)
         self.assertEqual(data["subtotal"], 500.0)
         self.assertEqual(data["items"][0]["product_name"], "Kaju Katli")
-        saved = get_db().carts.find_one({"guest_id": self.guest_id})
+        saved = get_db().carts.find_one({"owner_id": f"guest:{self.guest_id}"})
         self.assertEqual(len(saved["items"]), 1)
         self.assertEqual(saved["items"][0]["quantity"], 2)
         self.assertEqual(str(saved["items"][0]["product_id"]), self.product_id)
@@ -88,7 +88,7 @@ class CartApiTests(APITestCase):
         items = response.json()["items"]
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["quantity"], 3)
-        self.assertEqual(len(get_db().carts.find_one({"guest_id": self.guest_id})["items"]), 1)
+        self.assertEqual(len(get_db().carts.find_one({"owner_id": f"guest:{self.guest_id}"})["items"]), 1)
 
     def test_cannot_add_more_than_stock(self):
         self.assertEqual(self.add(quantity=6).status_code, 409)  # stock is 5

@@ -1,6 +1,6 @@
 """Checkout validation, order placement and order history.
 
-Orders belong to the guest id sent in the X-Guest-ID header (there is no customer login yet).
+Orders belong to an owner: a logged-in customer (Bearer token) or a guest browser (X-Guest-ID header).
 
 About safety: this MongoDB is a standalone server, so multi-document transactions are NOT
 available. Instead the order is placed in careful steps (see order_create). That is safer than
@@ -18,7 +18,8 @@ from rest_framework.decorators import api_view, authentication_classes
 from rest_framework.response import Response
 
 from apps.accounts.views import address_to_json
-from apps.cart.views import cart_to_json, missing_guest_id, read_guest_id
+from apps.accounts.customer_auth import get_owner, require_login
+from apps.cart.views import cart_to_json
 from apps.products.views import current_time, error_response, to_object_id
 from config.mongodb import get_db
 
@@ -26,6 +27,17 @@ logger = logging.getLogger(__name__)
 
 ORDER_STATUSES = ["Pending", "Confirmed", "Processing", "Shipped", "Delivered", "Cancelled"]
 NEW_ORDER_STATUS = ORDER_STATUSES[0]  # every new order starts as Pending
+
+# Which status an admin may move an order to. An order moves forward one step at a time and can be
+# cancelled until it is shipped. Delivered and Cancelled orders are final.
+ALLOWED_STATUS_CHANGES = {
+    "Pending": ["Confirmed", "Cancelled"],
+    "Confirmed": ["Processing", "Cancelled"],
+    "Processing": ["Shipped", "Cancelled"],
+    "Shipped": ["Delivered"],
+    "Delivered": [],
+    "Cancelled": [],
+}
 
 # No payment method has been defined by the business and there is no payment gateway,
 # so we do not pretend. Nothing is marked as paid.
@@ -43,16 +55,20 @@ DELIVERY_CHARGE_NOTE = "To be confirmed"
 @api_view(["POST"])
 @authentication_classes([])
 def checkout_validate(request):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
+    # Only a logged-in customer may order. This is checked here, on the server, so it cannot be skipped.
+    login_error = require_login(owner_id)
+    if login_error:
+        return login_error
     if not isinstance(request.data, dict):
         return error_response("Send a JSON object.", status.HTTP_400_BAD_REQUEST)
 
     db = get_db()
 
     # 1. The cart must have products (read from MongoDB, not from the request)
-    cart = db.carts.find_one({"guest_id": guest_id})
+    cart = db.carts.find_one({"owner_id": owner_id})
     if not cart or not cart["items"]:
         return error_response("Your cart is empty.", status.HTTP_400_BAD_REQUEST)
 
@@ -63,7 +79,7 @@ def checkout_validate(request):
     address_object_id = to_object_id(address_id)
     if address_object_id is None:
         return error_response("Invalid address id.", status.HTTP_400_BAD_REQUEST)
-    address = db.addresses.find_one({"_id": address_object_id, "guest_id": guest_id})
+    address = db.addresses.find_one({"_id": address_object_id, "owner_id": owner_id})
     if address is None:
         return error_response("Address not found.", status.HTTP_404_NOT_FOUND)
 
@@ -230,15 +246,19 @@ def restore_stock(db, lines):
 @api_view(["POST"])
 @authentication_classes([])
 def order_create(request):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
+    # Only a logged-in customer may order. This is checked here, on the server, so it cannot be skipped.
+    login_error = require_login(owner_id)
+    if login_error:
+        return login_error
     if not isinstance(request.data, dict):
         return error_response("Send a JSON object.", status.HTTP_400_BAD_REQUEST)
     db = get_db()
 
     # 1. Cart: read from MongoDB. It must not be empty.
-    cart = db.carts.find_one({"guest_id": guest_id})
+    cart = db.carts.find_one({"owner_id": owner_id})
     if not cart or not cart["items"]:
         return error_response("Your cart is empty.", status.HTTP_400_BAD_REQUEST)
 
@@ -249,7 +269,7 @@ def order_create(request):
     address_object_id = to_object_id(address_id)
     if address_object_id is None:
         return error_response("Invalid address id.", status.HTTP_400_BAD_REQUEST)
-    address = db.addresses.find_one({"_id": address_object_id, "guest_id": guest_id})
+    address = db.addresses.find_one({"_id": address_object_id, "owner_id": owner_id})
     if address is None:
         return error_response("Address not found.", status.HTTP_404_NOT_FOUND)
 
@@ -259,7 +279,7 @@ def order_create(request):
     lock_token = uuid.uuid4().hex
     lock_result = db.carts.update_one(
         {
-            "guest_id": guest_id,
+            "owner_id": owner_id,
             "items.0": {"$exists": True},
             "$or": [
                 {"checkout_lock_at": {"$exists": False}},
@@ -277,7 +297,7 @@ def order_create(request):
     order_saved = False
     try:
         # Read the cart again now that we own the lock
-        cart = db.carts.find_one({"guest_id": guest_id, "checkout_lock": lock_token})
+        cart = db.carts.find_one({"owner_id": owner_id, "checkout_lock": lock_token})
         if not cart or not cart["items"]:
             return error_response("Your cart is empty.", status.HTTP_400_BAD_REQUEST)
 
@@ -303,7 +323,7 @@ def order_create(request):
         subtotal = round(sum(line["item_total"] for line in lines), 2)
         now = current_time()
         order = {
-            "guest_id": guest_id,
+            "owner_id": owner_id,
             "items": lines,
             # A COPY of the address, so later address edits never change this order
             "delivery_address": {field: address[field] for field in ADDRESS_FIELDS},
@@ -334,7 +354,7 @@ def order_create(request):
         # 8. Only now, after the order is saved, empty the cart (and drop the lock)
         try:
             db.carts.update_one(
-                {"guest_id": guest_id, "checkout_lock": lock_token},
+                {"owner_id": owner_id, "checkout_lock": lock_token},
                 {
                     "$set": {"items": [], "updated_at": current_time()},
                     "$unset": {"checkout_lock": "", "checkout_lock_at": ""},
@@ -354,7 +374,7 @@ def order_create(request):
         # Remove our lock if it is still there (the success path already removed it).
         try:
             db.carts.update_one(
-                {"guest_id": guest_id, "checkout_lock": lock_token},
+                {"owner_id": owner_id, "checkout_lock": lock_token},
                 {"$unset": {"checkout_lock": "", "checkout_lock_at": ""}},
             )
         except PyMongoError:
@@ -368,25 +388,25 @@ def order_create(request):
 @api_view(["GET"])
 @authentication_classes([])
 def order_list(request):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
     # Only this guest's orders (the guest id is part of the query), newest first
-    orders = get_db().orders.find({"guest_id": guest_id}).sort("created_at", -1)
+    orders = get_db().orders.find({"owner_id": owner_id}).sort("created_at", -1)
     return Response([order_to_json(order) for order in orders])
 
 
 @api_view(["GET"])
 @authentication_classes([])
 def order_detail(request, order_id):
-    guest_id = read_guest_id(request)
-    if guest_id is None:
-        return missing_guest_id()
+    owner_id, error = get_owner(request)
+    if error:
+        return error
     object_id = to_object_id(order_id)
     if object_id is None:
         return error_response("Invalid order id.", status.HTTP_400_BAD_REQUEST)
     # Ownership check: another guest's order is simply "not found"
-    order = get_db().orders.find_one({"_id": object_id, "guest_id": guest_id})
+    order = get_db().orders.find_one({"_id": object_id, "owner_id": owner_id})
     if order is None:
         return error_response("Order not found.", status.HTTP_404_NOT_FOUND)
     return Response(order_to_json(order))

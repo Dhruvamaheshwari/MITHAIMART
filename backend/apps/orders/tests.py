@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from django.test import override_settings
 from rest_framework.test import APIClient, APITestCase
 
-from apps.accounts.tests import VALID_ADDRESS
+from apps.accounts.tests import VALID_ADDRESS, make_customer_token
 from config.mongodb import get_db
 
 TEST_DB_NAME = "mithaimart_test"
@@ -17,6 +17,7 @@ class CheckoutValidationTests(APITestCase):
         db = get_db()
         db.client.drop_database(TEST_DB_NAME)
         self.guest_id = str(uuid.uuid4())
+        self.buyer_owner_id, self.buyer_token = make_customer_token("buyer@example.com")
         category_id = db.categories.insert_one({"name": "Sweets", "is_active": True}).inserted_id
         self.product_id = str(
             db.products.insert_one(
@@ -36,10 +37,17 @@ class CheckoutValidationTests(APITestCase):
         get_db().client.drop_database(TEST_DB_NAME)
 
     # helpers -------------------------------------------------------------
+    def identity(self, who):
+        """Who is making the request. "default" = the logged-in buyer, the other_guest_id = a second logged-in
+        customer, None = nobody, anything else = a guest browser with that id."""
+        if who == "default":
+            return {"HTTP_AUTHORIZATION": f"Bearer {self.buyer_token}"}
+        if who == getattr(self, "other_guest_id", object()):
+            return {"HTTP_AUTHORIZATION": f"Bearer {self.other_token}"}
+        return {"HTTP_X_GUEST_ID": who} if who else {}
+
     def call(self, method, url, body=None, guest_id="default"):
-        guest_id = self.guest_id if guest_id == "default" else guest_id
-        headers = {"HTTP_X_GUEST_ID": guest_id} if guest_id else {}
-        return getattr(self.client, method)(url, body, format="json", **headers)
+        return getattr(self.client, method)(url, body, format="json", **self.identity(guest_id))
 
     def add_to_cart(self, quantity=2):
         body = {"product_id": self.product_id, "variant_weight": "250g", "quantity": quantity}
@@ -129,9 +137,11 @@ class OrderApiTests(APITestCase):
         db = get_db()
         db.client.drop_database(TEST_DB_NAME)
         db.orders.create_index("order_number", unique=True)
-        db.carts.create_index("guest_id", unique=True)
+        db.carts.create_index("owner_id", unique=True)
         self.guest_id = str(uuid.uuid4())
-        self.other_guest_id = str(uuid.uuid4())
+        self.other_guest_id = str(uuid.uuid4())  # stands for a second logged-in customer, see identity()
+        self.buyer_owner_id, self.buyer_token = make_customer_token("buyer@example.com")
+        self.other_owner_id, self.other_token = make_customer_token("other@example.com")
         category_id = db.categories.insert_one({"name": "Sweets", "is_active": True}).inserted_id
         self.kaju_id = str(self.make_product(category_id, "Kaju Katli", "250g", 250.0, 5, "https://example.com/k.jpg"))
         self.jamun_id = str(self.make_product(category_id, "Gulab Jamun", "500g", 220.0, 8, ""))
@@ -153,10 +163,17 @@ class OrderApiTests(APITestCase):
         get_db().client.drop_database(TEST_DB_NAME)
 
     # helpers -------------------------------------------------------------
+    def identity(self, who):
+        """Who is making the request. "default" = the logged-in buyer, the other_guest_id = a second logged-in
+        customer, None = nobody, anything else = a guest browser with that id."""
+        if who == "default":
+            return {"HTTP_AUTHORIZATION": f"Bearer {self.buyer_token}"}
+        if who == getattr(self, "other_guest_id", object()):
+            return {"HTTP_AUTHORIZATION": f"Bearer {self.other_token}"}
+        return {"HTTP_X_GUEST_ID": who} if who else {}
+
     def call(self, method, url, body=None, guest_id="default", client=None):
-        guest_id = self.guest_id if guest_id == "default" else guest_id
-        headers = {"HTTP_X_GUEST_ID": guest_id} if guest_id else {}
-        return getattr(client or self.client, method)(url, body, format="json", **headers)
+        return getattr(client or self.client, method)(url, body, format="json", **self.identity(guest_id))
 
     def add_to_cart(self, product_id, weight, quantity, guest_id="default"):
         body = {"product_id": product_id, "variant_weight": weight, "quantity": quantity}
@@ -194,10 +211,10 @@ class OrderApiTests(APITestCase):
         self.assertEqual([i["item_total"] for i in order["items"]], [500.0, 220.0])
         self.assertEqual(order["items"][0]["product_name"], "Kaju Katli")
         self.assertEqual(order["items"][0]["product_image"], "https://example.com/k.jpg")
-        self.assertNotIn("guest_id", order)
+        self.assertNotIn("owner_id", order)
 
         saved = get_db().orders.find_one({})
-        self.assertEqual(saved["guest_id"], self.guest_id)
+        self.assertEqual(saved["owner_id"], self.buyer_owner_id)
         self.assertEqual(str(saved["items"][0]["product_id"]), self.kaju_id)  # real ObjectId reference
         self.assertEqual(saved["delivery_address"]["city"], "Bengaluru")
 
@@ -278,7 +295,7 @@ class OrderApiTests(APITestCase):
         self.assertEqual(self.stock("Gulab Jamun"), 0)  # untouched by us
         self.assertEqual(get_db().orders.count_documents({}), 0)
         self.assertEqual(self.cart_quantity(), 5)
-        self.assertNotIn("checkout_lock", get_db().carts.find_one({"guest_id": self.guest_id}))
+        self.assertNotIn("checkout_lock", get_db().carts.find_one({"owner_id": self.buyer_owner_id}))
 
     def test_database_error_while_saving_order_restores_stock(self):
         from unittest import mock
@@ -356,7 +373,7 @@ class OrderApiTests(APITestCase):
         for _ in range(2):
             self.add_to_cart(self.kaju_id, "250g", 1)
             my_numbers.append(self.place(address_id).json()["order_number"])
-        # another guest also orders
+        # another customer also orders
         self.add_to_cart(self.jamun_id, "500g", 1, guest_id=self.other_guest_id)
         other_address = self.make_address(guest_id=self.other_guest_id)
         self.assertEqual(self.place(other_address, guest_id=self.other_guest_id).status_code, 201)
@@ -393,3 +410,51 @@ class OrderApiTests(APITestCase):
     def test_guest_id_required(self):
         self.assertEqual(self.call("post", "/api/orders/create/", {}, guest_id=None).status_code, 400)
         self.assertEqual(self.call("get", "/api/orders/", guest_id=None).status_code, 400)
+
+    # ordering needs an account ---------------------------------------------------
+    def test_a_guest_cannot_place_an_order_even_with_a_full_cart_and_a_valid_address(self):
+        guest = self.guest_id  # a guest browser: only a guest id, no login token
+        self.add_to_cart(self.kaju_id, "250g", 2, guest_id=guest)
+        address_id = self.make_address(guest_id=guest)  # addresses can still be saved by a guest
+        response = self.place(address_id, guest_id=guest)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"], "Please log in to place an order.")
+        # nothing happened: no order, stock not reduced, cart kept, no checkout lock left behind
+        self.assertEqual(get_db().orders.count_documents({}), 0)
+        self.assertEqual(self.stock("Kaju Katli"), 5)
+        cart = get_db().carts.find_one({"owner_id": f"guest:{guest}"})
+        self.assertEqual(cart["items"][0]["quantity"], 2)
+        self.assertNotIn("checkout_lock", cart)
+
+    def test_a_guest_cannot_use_the_checkout_check_either(self):
+        guest = self.guest_id
+        self.add_to_cart(self.kaju_id, "250g", 1, guest_id=guest)
+        address_id = self.make_address(guest_id=guest)
+        response = self.call("post", "/api/checkout/validate/", {"address_id": address_id}, guest_id=guest)
+        self.assertEqual(response.status_code, 401)
+
+    def test_login_is_checked_before_anything_else_so_a_guest_learns_nothing(self):
+        # an empty cart, an unknown address and a bad body all give the same "log in" answer to a guest
+        for body in ({}, {"address_id": "a" * 24}, {"address_id": "abc"}, {"address_id": self.make_address()}):
+            response = self.call("post", "/api/orders/create/", body, guest_id=self.guest_id)
+            self.assertEqual(response.status_code, 401, body)
+        self.assertEqual(get_db().orders.count_documents({}), 0)
+
+    def test_bad_expired_or_admin_tokens_cannot_place_an_order(self):
+        self.add_to_cart(self.kaju_id, "250g", 1)
+        address_id = self.make_address()
+        for header in (
+            {"HTTP_AUTHORIZATION": "Bearer garbage"},
+            {"HTTP_AUTHORIZATION": "Bearer " + self.buyer_token[:-3] + "abc"},  # tampered signature
+            {"HTTP_AUTHORIZATION": "Basic dXNlcjpwYXNz"},  # not a customer login: counts as no login at all
+        ):
+            response = self.client.post("/api/orders/create/", {"address_id": address_id}, format="json", **header)
+            self.assertIn(response.status_code, (400, 401), header)
+        self.assertEqual(get_db().orders.count_documents({}), 0)
+        self.assertEqual(self.stock("Kaju Katli"), 5)
+
+    def test_a_logged_in_customer_can_still_order_and_the_guest_cart_is_not_involved(self):
+        self.add_to_cart(self.kaju_id, "250g", 1)
+        response = self.place(self.make_address())
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(get_db().orders.find_one({})["owner_id"], self.buyer_owner_id)
