@@ -22,6 +22,8 @@ import MyOrders from './pages/MyOrders'
 import OrderConfirmation from './pages/OrderConfirmation'
 import ProductDetails from './pages/ProductDetails'
 import Products from './pages/Products'
+import Contact from './pages/Contact'
+import Catalog from './pages/Catalog'
 
 function NotFound() {
   return (
@@ -81,6 +83,8 @@ export default function App() {
               <Route path="/addresses" element={<RequireLogin><Addresses /></RequireLogin>} />
               <Route path="/order-confirmation/:id" element={<RequireLogin><OrderConfirmation /></RequireLogin>} />
               <Route path="/my-orders" element={<RequireLogin><MyOrders /></RequireLogin>} />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/catalog" element={<Catalog />} />
               <Route path="/credits" element={<Credits />} />
             <Route path="/login" element={<AuthPage mode="login" />} />
               <Route path="/register" element={<AuthPage mode="register" />} />

@@ -252,7 +252,7 @@ export default function Navbar() {
           </Link>
 
           <Link
-            to="/products"
+            to="/contact"
             className="hidden sm:flex flex-col items-center text-[#542B24] hover:text-[#9B4A32] transition-colors group"
           >
             <Phone size={19} className="transition-transform group-hover:scale-110" />
@@ -260,7 +260,7 @@ export default function Navbar() {
           </Link>
 
           <Link
-            to="/products"
+            to="/catalog"
             className="hidden sm:flex flex-col items-center text-[#542B24] hover:text-[#9B4A32] transition-colors group"
           >
             <BookOpen size={19} className="transition-transform group-hover:scale-110" />
@@ -469,7 +469,23 @@ export default function Navbar() {
             ))}
           </div>
 
-          <div className="mt-4 pt-3 border-t border-[#E8D5B5] space-y-2">
+          <div className="mt-4 pt-3 border-t border-[#E8D5B5] space-y-1.5">
+            <Link
+              to="/catalog"
+              onClick={() => setMobileMenuOpen(false)}
+              className="flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold text-[#542B24] hover:bg-[#E8D5B5]/40"
+            >
+              <BookOpen size={15} className="text-[#9B4A32]" />
+              <span>Product Catalog (Download PDF)</span>
+            </Link>
+            <Link
+              to="/contact"
+              onClick={() => setMobileMenuOpen(false)}
+              className="flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-bold text-[#542B24] hover:bg-[#E8D5B5]/40"
+            >
+              <Phone size={15} className="text-[#9B4A32]" />
+              <span>Contact & Support</span>
+            </Link>
             <Link
               to="/my-orders"
               onClick={() => setMobileMenuOpen(false)}

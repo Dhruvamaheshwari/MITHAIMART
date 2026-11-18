@@ -162,3 +162,13 @@ LOW_STOCK_THRESHOLD = int(get_env("LOW_STOCK_THRESHOLD", "5"))
 CLOUDINARY_CLOUD_NAME = get_env("CLOUDINARY_CLOUD_NAME", "")
 CLOUDINARY_API_KEY = get_env("CLOUDINARY_API_KEY", "")
 CLOUDINARY_API_SECRET = get_env("CLOUDINARY_API_SECRET", "")
+
+# Email / SMTP Configuration
+EMAIL_BACKEND = get_env("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST = get_env("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(get_env("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = get_env("EMAIL_USE_TLS", "True").lower() in ("1", "true", "yes")
+EMAIL_HOST_USER = get_env("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = get_env("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = get_env("DEFAULT_FROM_EMAIL", "MithaiMart <noreply@mithaimart.com>")
+CONTACT_RECIPIENT_EMAIL = get_env("CONTACT_RECIPIENT_EMAIL", get_env("EMAIL_HOST_USER", "contact@mithaimart.com"))

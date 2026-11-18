@@ -117,6 +117,16 @@ export default function Footer() {
               </h3>
               <ul className="space-y-2 text-xs font-medium text-[#E8D5B5]/90">
                 <li>
+                  <Link to="/catalog" className="hover:text-[#C99A42] transition-colors font-bold text-[#FFF8EC]">
+                    Product Catalog (PDF Menu)
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/contact" className="hover:text-[#C99A42] transition-colors font-bold text-[#FFF8EC]">
+                    Contact & Support
+                  </Link>
+                </li>
+                <li>
                   <Link to="/products" className="hover:text-[#C99A42] transition-colors">
                     Our Stores
                   </Link>
