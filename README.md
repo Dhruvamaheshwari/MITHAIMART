@@ -1,13 +1,20 @@
 # MithaiMart
 
-Premium Indian sweets and snacks e-commerce platform. Separate Django REST backend and React (Vite) frontend.
+MithaiMart is a full-stack Indian sweets, snacks, gifting, and wholesale ordering
+platform. It combines a Django backend with a React/Vite storefront and a
+separate staff administration area.
 
-This repository currently contains **Phase 1: project foundation only** (no auth, products, cart, checkout or admin dashboard yet).
+The application supports guest shopping and customer accounts, product
+catalogue management, cart and checkout flows, order tracking, custom hampers,
+bulk ordering, wholesale quotations, product image uploads, and downloadable
+catalogues.
 
 ## Stack
 
-- Backend: Python 3.12, Django, Django REST Framework, SimpleJWT (installed, not yet used), django-cors-headers, MongoDB (PyMongo, runs in Docker)
-- Frontend: React + Vite (JavaScript), Tailwind CSS 3, React Router DOM, Axios, Lucide React
+- Backend: Python 3.12+, Django 6.1, Django REST Framework, PyMongo, SimpleJWT, Cloudinary, django-cors-headers
+- Frontend: React 19, Vite 8, React Router, Tailwind CSS 3, Axios, Lucide React, QRCode
+- Database: MongoDB for application data and SQLite for Django's local admin/session tables
+- Development services: Docker Compose
 
 ## Structure
 
@@ -15,16 +22,29 @@ This repository currently contains **Phase 1: project foundation only** (no auth
 MithaiMart/
   backend/
     config/            Django project (settings, urls, wsgi/asgi)
-    apps/core/         Health-check API
+    apps/              accounts, cart, core, orders and products
     manage.py
     requirements.txt
     .env.example
   frontend/
-    src/{assets,components,pages,layouts,services,context,hooks,utils,routes,styles}
+    src/               React pages, components, context and API services
     public/
     package.json
     .env.example
 ```
+
+## Features
+
+- Browse products by category, state, search term, price range, and availability.
+- Product variants with independent weights, prices, stock, and availability.
+- Guest carts and customer accounts with account-linked carts, addresses, and orders.
+- Checkout with address management, stock validation, order creation, and order history.
+- Custom gift hamper builder with box selection and product estimates.
+- Bulk ordering with quantity rules, estimates, and cart support.
+- Wholesale request and quotation workflow for customers and staff.
+- Staff dashboard for products, categories, stock, orders, hampers, and wholesale requests.
+- Cloudinary image uploads with a local MongoDB fallback for development.
+- Downloadable PDF catalogue and QR code, contact form, coupon validation, and image credits.
 
 ## Prerequisites
 
@@ -78,7 +98,14 @@ copy .env.example .env           # macOS/Linux: cp .env.example .env
 npm run dev
 ```
 
-App: http://localhost:5173 (shows the API status from the health endpoint).
+App: http://localhost:5173
+
+Build and lint the frontend before deployment:
+
+```bash
+npm run lint
+npm run build
+```
 
 ## Environment variables
 
@@ -172,11 +199,14 @@ Images are stored in Cloudinary. MongoDB only keeps the image link (`image_url`)
    `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
 3. Restart the backend. In `/admin/products` choose an image, check the preview and press **Upload image**, then save the product.
 
-`POST /api/admin/upload-image/` (admin token only, multipart form field `image`) accepts JPEG, PNG or WebP up to 5 MB. The type is checked from the file contents, not the file name. It returns `{"url": "https://res.cloudinary.com/..."}`. Without the three Cloudinary settings the image file is stored in MongoDB (collection `images`) and the returned link looks like `http://host/api/images/<id>/` (public `GET /api/images/<id>/`). Fine for now; use Cloudinary for a real shop The "paste an image link" field still works as a fallback.
+`POST /api/admin/upload-image/` (admin token only, multipart form field `image`) accepts JPEG, PNG or WebP up to 5 MB. The type is checked from the file contents, not the file name. It returns `{"url": "https://res.cloudinary.com/..."}`. Without the three Cloudinary settings the image file is stored in MongoDB (collection `images`) and the returned link looks like `http://host/api/images/<id>/` (public `GET /api/images/<id>/`). This is fine for local development; use Cloudinary for a real shop. The "paste an image link" field still works as a fallback.
 
 ## Photos that ship with the website
 
-`frontend/public/images/` holds 12 sweets photos from Wikimedia Commons, used under free Creative Commons or public-domain licences (the home page banner in `hero/`, and `sweets/` with kaju katli, gulab jamun, rasgulla, jalebi, motichoor laddu, barfi, soan papdi, rasmalai, bengali sandesh, bikaneri bhujia and a gift box).
+`frontend/public/images/` holds 126 sweets, snacks, bakery, chocolate, and
+gifting photos from Wikimedia Commons, used under free Creative Commons or
+public-domain licences. The home page banner is in `hero/`; catalogue photos
+are in `sweets/`.
 
 - Every photo is credited (author, licence, source link) on the **/credits** page, linked from the footer. The licences require this. The list lives in `frontend/src/data/photoCredits.js`: if you add or remove a photo, update it.
 - In the admin product and category forms, choose **"Or use a photo from the project"**, or type the path yourself, for example `/images/sweets/kaju-katli.jpg`. The backend accepts only `/images/...` paths made of letters, digits, `-` and `_` ending in .jpg, .jpeg, .png, .webp, .gif or .avif (no `..` and no other website).
@@ -219,6 +249,11 @@ cd backend
 python manage.py test
 ```
 
-## Planned modules (not implemented)
+## Current limitations
 
-Customers, products, categories, variants and pricing, cart, wishlist, addresses, coupons, checkout, payments (Razorpay), orders, inventory, admin dashboard, reviews, notifications. Product images via Cloudinary.
+- Payment processing is not integrated; orders are not marked as paid.
+- Delivery charges are not calculated yet and remain "To be confirmed".
+- MongoDB is run as a standalone local service, so order creation uses
+  application-level stock protection rather than database transactions.
+- Cloudinary is recommended for production image storage. The MongoDB image
+  fallback is intended for local development.
