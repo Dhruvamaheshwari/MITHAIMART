@@ -42,6 +42,11 @@ def wholesale_to_json(req, is_admin=False):
     if req_status == "Quotation Sent" and expires_at and expires_at < now:
         req_status = "Expired"
 
+    estimated_normal = float(req.get("estimated_normal_total", 0.0))
+    quoted_price = float(req["quoted_price"]) if req.get("quoted_price") is not None else None
+    estimated_total = quoted_price if quoted_price is not None else estimated_normal
+    estimated_discount = max(0.0, round(estimated_normal - estimated_total, 2)) if quoted_price is not None else 0.0
+
     data = {
         "id": str(req["_id"]),
         "request_id": req.get("request_id", ""),
@@ -50,19 +55,27 @@ def wholesale_to_json(req, is_admin=False):
         "email": req.get("email", ""),
         "business_name": req.get("business_name", ""),
         "selected_items": req.get("selected_items", []),
+        "items": req.get("selected_items", []),
         "total_weight_kg": float(req.get("total_weight_kg", 0.0)),
-        "estimated_normal_total": float(req.get("estimated_normal_total", 0.0)),
+        "total_kg": float(req.get("total_weight_kg", 0.0)),
+        "estimated_normal_total": estimated_normal,
+        "estimated_original": estimated_normal,
+        "estimated_discount": estimated_discount,
+        "estimated_total": estimated_total,
         "preferred_delivery_date": req.get("preferred_delivery_date", ""),
         "delivery_city": req.get("delivery_city", ""),
         "delivery_pincode": req.get("delivery_pincode", ""),
         "delivery_state": req.get("delivery_state", ""),
         "additional_notes": req.get("additional_notes", ""),
         "status": req_status,
-        "quoted_price": float(req["quoted_price"]) if req.get("quoted_price") is not None else None,
+        "quoted_price": quoted_price,
+        "quoted_total_price": quoted_price,
         "quotation_notes": req.get("quotation_notes", ""),
         "quotation_expires_at": expires_at.isoformat() if expires_at else None,
         "order_id": str(req["order_id"]) if req.get("order_id") else None,
         "order_number": req.get("order_number"),
+        "is_converted_to_order": req.get("status") == "Converted to Order",
+        "converted_order_number": req.get("order_number"),
         "created_at": req["created_at"].isoformat() if req.get("created_at") else None,
         "updated_at": req["updated_at"].isoformat() if req.get("updated_at") else None,
     }
@@ -419,10 +432,10 @@ def admin_wholesale_detail(request, request_id):
 def admin_wholesale_send_quotation(request, request_id):
     """Admin inputs quoted price, quotation notes, validity period, and sends to customer."""
     data = request.data or {}
-    quoted_price = data.get("quoted_price")
-    quotation_notes = str(data.get("quotation_notes", "")).strip()
+    quoted_price = data.get("quoted_price", data.get("quoted_total_price"))
+    quotation_notes = str(data.get("quotation_notes", data.get("customer_notes", ""))).strip()
     admin_notes = str(data.get("admin_notes", "")).strip()
-    validity_days = int(data.get("validity_days", 7))
+    validity_days = int(data.get("validity_days", data.get("valid_days", 7)))
 
     if quoted_price is None or not isinstance(quoted_price, (int, float)) or quoted_price <= 0:
         return error_response("A valid positive quoted price is required.", status.HTTP_400_BAD_REQUEST)
@@ -483,4 +496,5 @@ def admin_wholesale_update_status(request, request_id):
         update_fields["admin_notes"] = str(admin_notes).strip()
 
     db.wholesale_requests.update_one({"_id": req["_id"]}, {"$set": update_fields})
-    return Response({"message": f"Status updated to {new_status}."})
+    updated_req = db.wholesale_requests.find_one({"_id": req["_id"]})
+    return Response(wholesale_to_json(updated_req, is_admin=True))

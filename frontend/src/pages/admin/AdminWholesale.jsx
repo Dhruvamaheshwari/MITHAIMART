@@ -87,7 +87,7 @@ export default function AdminWholesale() {
     setLoadError('')
     try {
       const response = await adminApi.get('/admin/wholesale/')
-      setRequests(response.data)
+      setRequests(Array.isArray(response.data) ? response.data : (response.data?.requests || []))
     } catch (err) {
       setLoadError(getErrorMessage(err))
     } finally {
@@ -101,7 +101,7 @@ export default function AdminWholesale() {
       const response = await adminApi.get('/admin/bulk/settings/')
       if (response.data) {
         setSettings({
-          active: response.data.active ?? true,
+          active: response.data.is_active ?? response.data.active ?? true,
           min_bulk_kg: response.data.min_bulk_kg ?? 5.0,
           instant_order_max_kg: response.data.instant_order_max_kg ?? 50.0,
           quotation_threshold_kg: response.data.quotation_threshold_kg ?? 50.0,
@@ -126,7 +126,7 @@ export default function AdminWholesale() {
       setSelectedRequest(data)
       setNewStatusChoice(data.status)
       setQuoteForm({
-        quoted_total_price: data.quoted_total_price || data.estimated_total || '',
+        quoted_total_price: data.quoted_price ?? data.quoted_total_price ?? data.estimated_normal_total ?? data.estimated_total ?? '',
         valid_days: 7,
         customer_notes: data.quotation_notes || '',
         admin_notes: data.admin_notes || '',
@@ -150,9 +150,9 @@ export default function AdminWholesale() {
     setSendingQuote(true)
     try {
       const payload = {
-        quoted_total_price: price,
-        valid_days: parseInt(quoteForm.valid_days, 10) || 7,
-        customer_notes: quoteForm.customer_notes.trim(),
+        quoted_price: price,
+        validity_days: parseInt(quoteForm.valid_days, 10) || 7,
+        quotation_notes: quoteForm.customer_notes.trim(),
         admin_notes: quoteForm.admin_notes.trim(),
       }
       const response = await adminApi.put(
@@ -164,7 +164,7 @@ export default function AdminWholesale() {
         text: `Official quotation sent for ${selectedRequest.request_id}! Price: ${formatPrice(price)}. Status updated to Quotation Sent.`,
       })
       // update state
-      setSelectedRequest(response.data.request)
+      setSelectedRequest(response.data)
       fetchRequests()
     } catch (err) {
       const errorMsg =
@@ -180,7 +180,7 @@ export default function AdminWholesale() {
     if (!selectedRequest || !newStatusChoice || newStatusChoice === selectedRequest.status) return
     setStatusUpdating(true)
     try {
-      const response = await adminApi.patch(
+      const response = await adminApi.put(
         `/admin/wholesale/${selectedRequest.request_id}/status/`,
         { status: newStatusChoice }
       )
@@ -201,14 +201,20 @@ export default function AdminWholesale() {
     e.preventDefault()
     setSettingsSaving(true)
     try {
-      const response = await adminApi.post('/admin/bulk/settings/', settings)
+      const response = await adminApi.post('/admin/bulk/settings/', {
+        is_active: settings.active,
+        min_bulk_kg: settings.min_bulk_kg,
+        instant_order_max_kg: settings.instant_order_max_kg,
+        quotation_threshold_kg: settings.quotation_threshold_kg,
+        slabs: settings.slabs,
+      })
       setMessage({
         ok: true,
         text: 'Bulk pricing discount rules and slabs successfully saved!',
       })
       if (response.data.rules) {
         setSettings({
-          active: response.data.rules.active ?? true,
+          active: response.data.rules.is_active ?? response.data.rules.active ?? true,
           min_bulk_kg: response.data.rules.min_bulk_kg ?? 5.0,
           instant_order_max_kg: response.data.rules.instant_order_max_kg ?? 50.0,
           quotation_threshold_kg: response.data.rules.quotation_threshold_kg ?? 50.0,

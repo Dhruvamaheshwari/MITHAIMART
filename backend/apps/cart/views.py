@@ -92,7 +92,10 @@ def load_variant(db, product_object_id, weight):
 
 def find_item(items, product_object_id, weight):
     for item in items:
-        if item["product_id"] == product_object_id and item["variant_weight"] == weight:
+        if not isinstance(item, dict):
+            continue
+        stored_product_id = item.get("product_id")
+        if stored_product_id is not None and str(stored_product_id) == str(product_object_id) and item.get("variant_weight") == weight:
             return item
     return None
 
@@ -120,10 +123,13 @@ def cart_to_json(db, cart):
     items = cart["items"] if cart else []
     all_product_ids = []
     for item in items:
+        if not isinstance(item, dict):
+            continue
         if item.get("is_hamper"):
             for sweet in item.get("items", []):
-                all_product_ids.append(sweet["product_id"])
-        else:
+                if isinstance(sweet, dict) and sweet.get("product_id") is not None:
+                    all_product_ids.append(sweet["product_id"])
+        elif item.get("is_bulk") or item.get("product_id") is not None:
             all_product_ids.append(item["product_id"])
 
     products = {p["_id"]: p for p in db.products.find({"_id": {"$in": all_product_ids}})}
@@ -133,6 +139,8 @@ def cart_to_json(db, cart):
     subtotal = 0.0
 
     for item in items:
+        if not isinstance(item, dict):
+            continue
         if item.get("is_hamper"):
             hamper_sweets = []
             hamper_sweets_total = 0.0
@@ -236,6 +244,8 @@ def cart_to_json(db, cart):
                 "available": available,
             })
         else:
+            if item.get("product_id") is None or item.get("variant_weight") is None:
+                continue
             product = products.get(item["product_id"])
             variant = None
             if product is not None:
@@ -362,6 +372,14 @@ def cart_remove(request, product_id, variant_weight):
     db = get_db()
     cart = db.carts.find_one({"owner_id": owner_id})
     items = cart["items"] if cart else []
+    items = [
+        item for item in items
+        if isinstance(item, dict) and (
+            item.get("is_hamper")
+            or item.get("is_bulk")
+            or (item.get("product_id") is not None and item.get("variant_weight") is not None)
+        )
+    ]
 
     # Handle removing a hamper item
     if str(product_id).startswith("hamper-") or variant_weight == "hamper":

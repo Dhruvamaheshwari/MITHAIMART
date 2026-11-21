@@ -249,6 +249,18 @@ def bulk_cart_add(request):
     bulk_items_to_add = []
     total_order_kg = 0.0
 
+    cart = db.carts.find_one({"owner_id": owner_id})
+    items = cart["items"] if cart else []
+
+    existing_bulk_weight = 0.0
+    for existing in items:
+        if not isinstance(existing, dict) or not existing.get("is_bulk"):
+            continue
+        existing_weight = parse_weight_to_grams(str(existing.get("variant_weight", "")))
+        existing_quantity = existing.get("quantity", 0)
+        if isinstance(existing_quantity, int) and existing_quantity > 0:
+            existing_bulk_weight += (existing_weight * existing_quantity) / 1000.0
+
     for item in raw_items:
         p_id = to_object_id(item.get("product_id"))
         weight = str(item.get("variant_weight", "")).strip()
@@ -276,6 +288,29 @@ def bulk_cart_add(request):
         calc = calculate_item_bulk_discount(grams, quantity, unit_price, rules)
         total_order_kg += calc["total_weight_kg"]
 
+        pending_bulk = next((
+            pending for pending in bulk_items_to_add
+            if str(pending.get("product_id")) == str(product["_id"])
+            and pending.get("variant_weight") == weight
+        ), None)
+        existing_bulk = next((
+            existing for existing in items
+            if isinstance(existing, dict)
+            and existing.get("is_bulk")
+            and str(existing.get("product_id")) == str(product["_id"])
+            and existing.get("variant_weight") == weight
+        ), None)
+        combined_quantity = (
+            quantity
+            + (pending_bulk.get("quantity", 0) if pending_bulk else 0)
+            + (existing_bulk.get("quantity", 0) if existing_bulk else 0)
+        )
+        if combined_quantity > int(variant.get("stock", 0)):
+            return error_response(
+                f"Only {variant.get('stock')} available for {product['name']} ({weight}).",
+                status.HTTP_409_CONFLICT
+            )
+
         bulk_items_to_add.append({
             "is_bulk": True,
             "bulk_id": str(uuid.uuid4()),
@@ -293,17 +328,42 @@ def bulk_cart_add(request):
             "created_at": current_time(),
         })
 
-    if total_order_kg > instant_max:
+    combined_bulk_weight = existing_bulk_weight + total_order_kg
+    if combined_bulk_weight > instant_max:
         return error_response(
-            f"Bulk order total weight is {round(total_order_kg, 1)} kg, which exceeds the instant online limit of {instant_max} kg. Please use 'Request Wholesale Quotation' to get a customized commercial quote.",
+            f"Bulk order total weight is {round(combined_bulk_weight, 1)} kg, which exceeds the instant online limit of {instant_max} kg. Please use 'Request Wholesale Quotation' to get a customized commercial quote.",
             status.HTTP_400_BAD_REQUEST
         )
 
-    cart = db.carts.find_one({"owner_id": owner_id})
-    items = cart["items"] if cart else []
-
-    # Append bulk items to cart
-    items.extend(bulk_items_to_add)
+    for bulk_item in bulk_items_to_add:
+        existing_bulk = next((
+            existing for existing in items
+            if isinstance(existing, dict)
+            and existing.get("is_bulk")
+            and str(existing.get("product_id")) == str(bulk_item["product_id"])
+            and existing.get("variant_weight") == bulk_item["variant_weight"]
+        ), None)
+        if existing_bulk:
+            existing_bulk["quantity"] = existing_bulk.get("quantity", 0) + bulk_item["quantity"]
+            existing_bulk["unit_price"] = bulk_item["unit_price"]
+            existing_bulk["normal_total"] = round(
+                bulk_item["unit_price"] * existing_bulk["quantity"], 2
+            )
+            rules_calc = calculate_item_bulk_discount(
+                parse_weight_to_grams(bulk_item["variant_weight"]),
+                existing_bulk["quantity"],
+                bulk_item["unit_price"],
+                rules,
+            )
+            existing_bulk.update({
+                "normal_total": rules_calc["normal_total"],
+                "discount_percentage": rules_calc["discount_percentage"],
+                "discount_amount": rules_calc["discount_amount"],
+                "item_total": rules_calc["discounted_total"],
+                "total_weight_kg": rules_calc["total_weight_kg"],
+            })
+        else:
+            items.append(bulk_item)
     save_items(db, owner_id, items)
 
     return Response(cart_to_json(db, {"items": items}), status=status.HTTP_201_CREATED)

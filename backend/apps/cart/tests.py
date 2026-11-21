@@ -152,6 +152,44 @@ class CartApiTests(APITestCase):
         self.assertEqual(self.call("delete", url).status_code, 404)  # already removed
         self.assertEqual(self.call("delete", "/api/cart/remove/abc/250g/").status_code, 400)
 
+    def test_bulk_cart_add_merges_repeated_items(self):
+        payload = {
+            "items": [{
+                "product_id": self.product_id,
+                "variant_weight": "250g",
+                "quantity": 2,
+            }]
+        }
+        self.assertEqual(self.call("post", "/api/bulk/cart/add/", payload).status_code, 201)
+        response = self.call("post", "/api/bulk/cart/add/", payload)
+        self.assertEqual(response.status_code, 201)
+
+        db = get_db()
+        saved = db.carts.find_one({"owner_id": f"guest:{self.guest_id}"})
+        bulk_items = [item for item in saved["items"] if item.get("is_bulk")]
+        self.assertEqual(len(bulk_items), 1)
+        self.assertEqual(bulk_items[0]["quantity"], 4)
+
+    def test_remove_item_skips_malformed_cart_rows(self):
+        db = get_db()
+        db.carts.insert_one({
+            "owner_id": f"guest:{self.guest_id}",
+            "items": [
+                {"variant_weight": "250g"},
+                {
+                    "product_id": db.products.find_one({"name": "Kaju Katli"})["_id"],
+                    "variant_weight": "250g",
+                    "quantity": 1,
+                    "product_name": "Kaju Katli",
+                    "product_image": "https://example.com/kaju.jpg",
+                    "variant_price": 250.0,
+                },
+            ],
+        })
+        response = self.call("delete", f"/api/cart/remove/{self.product_id}/250g/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["items"], [])
+
     def test_clear_cart(self):
         self.add()
         response = self.call("delete", "/api/cart/clear/")
